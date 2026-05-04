@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OBX Conditions</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Outer Banks, NC</p>
+          <h1>Sound, surf, and weather at a glance.</h1>
+          <p class="lede">
+            Live conditions for Currituck Sound at Corolla, Duck FRF offshore waves,
+            Carova Atlantic tides, and Carova Beach Fire Department area weather.
+          </p>
+        </div>
+        <div class="hero-panel">
+          <span class="status-dot" id="system-status-dot"></span>
+          <div>
+            <p class="panel-label">Data status</p>
+            <strong id="system-status">Loading live feeds</strong>
+            <span id="last-updated">Checking sources...</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="alerts" class="alerts" hidden></section>
+
+      <section class="grid priority-grid" aria-label="Primary conditions">
+        <article class="card feature-card" id="sound-card">
+          <div class="card-top">
+            <div>
+              <p class="eyebrow">Currituck Sound</p>
+              <h2>Inland water level</h2>
+            </div>
+            <a class="source-link" href="https://waterdata.usgs.gov/monitoring-location/USGS-02043433/" target="_blank" rel="noreferrer">USGS 02043433</a>
+          </div>
+          <div class="metric-row">
+            <div>
+              <span class="metric-value" id="sound-level">--</span>
+              <span class="metric-unit">ft</span>
+            </div>
+            <span class="trend-pill" id="sound-trend">--</span>
+          </div>
+          <div class="chart-wrap">
+            <svg id="sound-chart" role="img" aria-label="30 day water level chart"></svg>
+          </div>
+          <dl class="stat-list">
+            <div>
+              <dt>24h change</dt>
+              <dd id="sound-24h">--</dd>
+            </div>
+            <div>
+              <dt>30d range</dt>
+              <dd id="sound-range">--</dd>
+            </div>
+            <div>
+              <dt>Latest reading</dt>
+              <dd id="sound-time">--</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article class="card feature-card ocean-card" id="ocean-card">
+          <div class="card-top">
+            <div>
+              <p class="eyebrow">Northern OBX surf</p>
+              <h2>Duck FRF buoy</h2>
+            </div>
+            <a class="source-link" href="https://www.ndbc.noaa.gov/station_page.php?station=44056" target="_blank" rel="noreferrer">NDBC 44056</a>
+          </div>
+          <div class="surf-split">
+            <div>
+              <span class="metric-value" id="wave-height">--</span>
+              <span class="metric-unit">ft waves</span>
+              <p id="wave-period">--</p>
+            </div>
+            <div>
+              <span class="metric-value" id="water-temp">--</span>
+              <span class="metric-unit">°F water</span>
+              <p id="wave-direction">--</p>
+            </div>
+          </div>
+          <div class="chart-wrap compact">
+            <svg id="wave-chart" role="img" aria-label="Recent wave height chart"></svg>
+          </div>
+          <dl class="stat-list">
+            <div>
+              <dt>Swell</dt>
+              <dd id="swell">--</dd>
+            </div>
+            <div>
+              <dt>Wind wave</dt>
+              <dd id="wind-wave">--</dd>
+            </div>
+            <div>
+              <dt>Air temp</dt>
+              <dd id="marine-air">--</dd>
+            </div>
+          </dl>
+        </article>
+      </section>
+
+      <section class="grid map-grid" aria-label="Northern Outer Banks buoy water temperatures">
+        <article class="card map-card" id="buoy-map-card">
+          <div class="card-top">
+            <div>
+              <p class="eyebrow">VA line water temps</p>
+              <h2>Buoy temperature map</h2>
+            </div>
+            <a class="source-link" href="https://www.ndbc.noaa.gov/" target="_blank" rel="noreferrer">NOAA NDBC</a>
+          </div>
+          <p class="map-intro">
+            A northern Outer Banks view centered on the VA/NC line oceanfront, with nearby,
+            northern, and offshore buoys plotted by latest water temperature.
+          </p>
+          <div class="buoy-layout">
+            <div class="buoy-map" id="buoy-map" role="application" aria-label="Interactive map of buoy water temperatures near the northern Outer Banks"></div>
+            <aside class="buoy-panel">
+              <div class="buoy-summary">
+                <div>
+                  <span id="buoy-count">--</span>
+                  <small>fresh buoys</small>
+                </div>
+                <div>
+                  <span id="buoy-range">--</span>
+                  <small>water temp range</small>
+                </div>
+              </div>
+              <div class="buoy-list" id="buoy-list"></div>
+              <p class="note" id="buoy-note">Loading NOAA buoy network...</p>
+            </aside>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid secondary-grid" aria-label="Weather and environment">
+        <article class="card tide-card" id="tide-card">
+          <div class="card-top">
+            <div>
+              <p class="eyebrow">Carova Atlantic</p>
+              <h2>Tide guidance</h2>
+            </div>
+            <a class="source-link" href="https://tidesandcurrents.noaa.gov/stationhome.html?id=8651370" target="_blank" rel="noreferrer">NOAA 8651370</a>
+          </div>
+          <div class="tide-current">
+            <div>
+              <span class="metric-value" id="tide-height">--</span>
+              <span class="metric-unit">ft</span>
+              <p id="tide-type">--</p>
+            </div>
+            <span class="trend-pill" id="tide-countdown">--</span>
+          </div>
+          <dl class="stat-list">
+            <div>
+              <dt>Next tide</dt>
+              <dd id="tide-next-time">--</dd>
+            </div>
+            <div>
+              <dt>Station</dt>
+              <dd id="tide-station">--</dd>
+            </div>
+            <div>
+              <dt>Datum</dt>
+              <dd id="tide-datum">--</dd>
+            </div>
+          </dl>
+          <div class="tide-list" id="tide-list"></div>
+          <p class="note" id="tide-note">Loading Atlantic tide predictions...</p>
+        </article>
+
+        <article class="card" id="weather-card">
+          <div class="card-top">
+            <div>
+              <p class="eyebrow">Carova Beach</p>
+              <h2>Fire station weather</h2>
+            </div>
+            <a class="source-link" href="https://currituck.weatherstem.com/ccemcarovabeach" target="_blank" rel="noreferrer">WeatherSTEM</a>
+          </div>
+          <div class="weather-current">
+            <div>
+              <span class="metric-value" id="weather-temp">--</span>
+              <span class="metric-unit">°F</span>
+              <p id="weather-summary">--</p>
+            </div>
+            <div class="wind-badge">
+              <span id="weather-wind">--</span>
+              <small>wind</small>
+            </div>
+          </div>
+          <dl class="stat-list">
+            <div>
+              <dt>Humidity</dt>
+              <dd id="weather-humidity">--</dd>
+            </div>
+            <div>
+              <dt>Pressure</dt>
+              <dd id="weather-pressure">--</dd>
+            </div>
+            <div>
+              <dt>Rain chance</dt>
+              <dd id="weather-rain">--</dd>
+            </div>
+          </dl>
+          <p class="note" id="weather-note">--</p>
+        </article>
+
+        <article class="card source-card">
+          <p class="eyebrow">MVP feed map</p>
+          <h2>What this dashboard pulls</h2>
+          <ul class="source-list">
+            <li><strong>Sound level:</strong> USGS instantaneous gage height for Currituck Sound on east bank at Corolla.</li>
+            <li><strong>Ocean data:</strong> NOAA NDBC Duck FRF realtime and spectral feeds, plus northern/offshore buoy water-temperature stations.</li>
+            <li><strong>Atlantic tides:</strong> NOAA CO-OPS high/low predictions from Duck Pier, the closest verified Atlantic tide station for Carova.</li>
+            <li><strong>Local weather:</strong> Currituck WeatherSTEM Carova fire station public portal, with NWS point forecast fallback.</li>
+          </ul>
+        </article>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
