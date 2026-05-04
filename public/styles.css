@@ -76,6 +76,27 @@ body::after {
   margin-bottom: 28px;
 }
 
+.brand-kicker {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.brand-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 12px;
+  box-shadow: 0 12px 24px rgba(9, 57, 68, 0.18);
+  object-fit: cover;
+}
+
+.brand-kicker .eyebrow {
+  margin: 0;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   color: var(--orange);
@@ -86,7 +107,8 @@ body::after {
 }
 
 h1,
-h2 {
+h2,
+h3 {
   margin: 0;
   font-family: "DM Serif Display", Georgia, serif;
   font-weight: 400;
@@ -102,6 +124,11 @@ h1 {
 h2 {
   font-size: clamp(1.8rem, 3vw, 2.8rem);
   letter-spacing: -0.035em;
+}
+
+h3 {
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
 }
 
 .lede {
@@ -325,10 +352,105 @@ h2 {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.chart-controls {
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
+  grid-template-columns: repeat(3, minmax(44px, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.chart-controls button {
+  min-width: 44px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.chart-controls button[aria-pressed="true"] {
+  color: #f7fbf8;
+  background: var(--blue-dark);
+  box-shadow: 0 8px 16px rgba(9, 57, 68, 0.16);
+}
+
+.chart-controls.light {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.chart-controls.light button {
+  color: rgba(238, 251, 247, 0.72);
+}
+
+.chart-controls.light button[aria-pressed="true"] {
+  color: #093944;
+  background: #bfe8df;
+}
+
 svg {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.has-chart-cursor {
+  cursor: crosshair;
+}
+
+.chart-hit-area {
+  pointer-events: all;
+}
+
+.chart-cursor {
+  transition: opacity 120ms ease;
+}
+
+.chart-cursor-line,
+.chart-cursor-dot {
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-cursor-line {
+  stroke-width: 2;
+  stroke-dasharray: 5 5;
+  opacity: 0.82;
+}
+
+.chart-cursor-dot {
+  stroke: rgba(255, 250, 240, 0.9);
+  stroke-width: 3;
+}
+
+.chart-cursor-bg {
+  filter: drop-shadow(0 8px 16px rgba(9, 57, 68, 0.18));
+}
+
+.chart-cursor-value,
+.chart-cursor-time {
+  font-family: "Manrope", "Avenir Next", sans-serif;
+  font-weight: 900;
+  pointer-events: none;
+}
+
+.chart-cursor-value {
+  font-size: 0.72rem;
+}
+
+.chart-cursor-time {
+  font-size: 0.58rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.82;
 }
 
 .chart-grid-line {
@@ -460,6 +582,225 @@ dd {
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.34);
   line-height: 1.5;
+}
+
+.condition-strip {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.condition-strip div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.condition-strip.light div {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.condition-strip span,
+.condition-strip strong {
+  display: block;
+}
+
+.condition-strip span {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.condition-strip.light span,
+.condition-strip.light strong {
+  color: rgba(238, 251, 247, 0.82);
+}
+
+.condition-strip strong {
+  margin-top: 5px;
+  font-size: 0.85rem;
+  line-height: 1.25;
+}
+
+.forecast-panel {
+  position: relative;
+  z-index: 1;
+  margin-top: 22px;
+}
+
+.mini-heading {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.mini-heading .eyebrow {
+  margin: 0;
+  font-size: 0.66rem;
+}
+
+.forecast-controls {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(64px, 1fr));
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.forecast-controls button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.forecast-controls button[aria-pressed="true"] {
+  color: #f7fbf8;
+  background: var(--blue-dark);
+  box-shadow: 0 8px 16px rgba(9, 57, 68, 0.16);
+}
+
+.forecast-list {
+  display: grid;
+  gap: 8px;
+}
+
+.forecast-item {
+  display: grid;
+  grid-template-columns: 54px 48px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.forecast-item.daily {
+  grid-template-columns: 78px 48px minmax(0, 1fr);
+}
+
+.forecast-item strong,
+.forecast-item span,
+.forecast-item small {
+  display: block;
+  min-width: 0;
+}
+
+.forecast-item strong,
+.forecast-item span {
+  font-weight: 900;
+}
+
+.forecast-item strong {
+  color: var(--blue-dark);
+  font-size: 0.82rem;
+}
+
+.forecast-item span {
+  font-size: 0.86rem;
+}
+
+.forecast-item small {
+  grid-column: 3;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.forecast-empty {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.tide-chart-wrap {
+  position: relative;
+  z-index: 1;
+  height: 170px;
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(230, 243, 237, 0.52), rgba(255, 255, 255, 0.28)),
+    rgba(255, 255, 255, 0.34);
+  overflow: hidden;
+}
+
+.tide-chart-marker,
+.tide-chart-now {
+  vector-effect: non-scaling-stroke;
+}
+
+.tide-chart-marker {
+  stroke: rgba(19, 36, 34, 0.13);
+  stroke-width: 1;
+  stroke-dasharray: 4 7;
+}
+
+.tide-chart-dot {
+  stroke: rgba(255, 250, 240, 0.95);
+  stroke-width: 3;
+}
+
+.tide-chart-dot.high {
+  fill: var(--blue);
+}
+
+.tide-chart-dot.low {
+  fill: var(--orange);
+}
+
+.tide-chart-label,
+.tide-chart-time,
+.tide-chart-now-label {
+  font-family: "Manrope", "Avenir Next", sans-serif;
+  font-weight: 900;
+  pointer-events: none;
+}
+
+.tide-chart-label {
+  fill: var(--blue-dark);
+  font-size: 0.58rem;
+  letter-spacing: 0.02em;
+}
+
+.tide-chart-time {
+  fill: var(--muted);
+  font-size: 0.56rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.tide-chart-now {
+  stroke: var(--orange);
+  stroke-width: 2;
+}
+
+.tide-chart-now-label {
+  fill: #89401e;
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .tide-list {
@@ -807,6 +1148,15 @@ dd {
 
   .stat-list {
     grid-template-columns: 1fr;
+  }
+
+  .condition-strip,
+  .forecast-item {
+    grid-template-columns: 1fr;
+  }
+
+  .forecast-item small {
+    grid-column: auto;
   }
 
   .wind-badge {

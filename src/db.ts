@@ -30,6 +30,27 @@ function compactJson(value: any) {
   return toJson(copy);
 }
 
+function compactSnapshot(value: Snapshot) {
+  return {
+    ...value,
+    sound: compactEntity(value.sound),
+    marine: compactEntity(value.marine),
+    buoys: value.buoys
+      ? {
+          ...value.buoys,
+          stations: value.buoys.stations?.map(compactEntity) ?? []
+        }
+      : value.buoys
+  };
+}
+
+function compactEntity<T extends Record<string, any> | undefined>(value: T): T {
+  if (!value) return value;
+  const copy = { ...value };
+  delete copy.history;
+  return copy as T;
+}
+
 function isOlderThan(referenceTime: string, observationTime: string, hours: number) {
   const reference = new Date(referenceTime).getTime();
   const observation = new Date(observationTime).getTime();
@@ -65,7 +86,8 @@ function getDb() {
       errors_json TEXT NOT NULL,
       sound_json TEXT,
       marine_json TEXT,
-      weather_json TEXT
+      weather_json TEXT,
+      snapshot_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS sound_levels (
@@ -95,6 +117,10 @@ function getDb() {
       pressure_hpa REAL,
       air_temp_f REAL,
       water_temp_f REAL,
+      dew_point_f REAL,
+      visibility_nmi REAL,
+      pressure_tendency_hpa REAL,
+      tide_ft REAL,
       source TEXT NOT NULL,
       fetched_at TEXT NOT NULL,
       raw_json TEXT NOT NULL,
@@ -157,8 +183,16 @@ function getDb() {
       average_period_sec REAL,
       mean_wave_direction_deg REAL,
       mean_wave_direction_text TEXT,
+      wind_direction_deg REAL,
+      wind_speed_mps REAL,
+      wind_gust_mps REAL,
+      pressure_hpa REAL,
       air_temp_f REAL,
       water_temp_f REAL,
+      dew_point_f REAL,
+      visibility_nmi REAL,
+      pressure_tendency_hpa REAL,
+      tide_ft REAL,
       source TEXT NOT NULL,
       fetched_at TEXT NOT NULL,
       is_stale INTEGER NOT NULL DEFAULT 0,
@@ -192,7 +226,27 @@ function getDb() {
       ON tide_predictions (time DESC);
   `);
 
+  ensureColumn(db, "snapshots", "snapshot_json", "TEXT");
+  ensureColumn(db, "marine_observations", "dew_point_f", "REAL");
+  ensureColumn(db, "marine_observations", "visibility_nmi", "REAL");
+  ensureColumn(db, "marine_observations", "pressure_tendency_hpa", "REAL");
+  ensureColumn(db, "marine_observations", "tide_ft", "REAL");
+  ensureColumn(db, "buoy_observations", "wind_direction_deg", "REAL");
+  ensureColumn(db, "buoy_observations", "wind_speed_mps", "REAL");
+  ensureColumn(db, "buoy_observations", "wind_gust_mps", "REAL");
+  ensureColumn(db, "buoy_observations", "pressure_hpa", "REAL");
+  ensureColumn(db, "buoy_observations", "dew_point_f", "REAL");
+  ensureColumn(db, "buoy_observations", "visibility_nmi", "REAL");
+  ensureColumn(db, "buoy_observations", "pressure_tendency_hpa", "REAL");
+  ensureColumn(db, "buoy_observations", "tide_ft", "REAL");
+
   return db;
+}
+
+function ensureColumn(db: Database, table: string, column: string, definition: string) {
+  const columns = db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (columns.some((item) => item.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
 export function persistSnapshot(snapshot: Snapshot) {
@@ -211,9 +265,10 @@ export function persistSnapshot(snapshot: Snapshot) {
       errors_json,
       sound_json,
       marine_json,
-      weather_json
+      weather_json,
+      snapshot_json
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(generated_at) DO UPDATE SET
       sound_latest_time = excluded.sound_latest_time,
       sound_level_ft = excluded.sound_level_ft,
@@ -225,7 +280,8 @@ export function persistSnapshot(snapshot: Snapshot) {
       errors_json = excluded.errors_json,
       sound_json = excluded.sound_json,
       marine_json = excluded.marine_json,
-      weather_json = excluded.weather_json
+      weather_json = excluded.weather_json,
+      snapshot_json = excluded.snapshot_json
   `);
 
   const insertSound = db.prepare(`
@@ -253,11 +309,15 @@ export function persistSnapshot(snapshot: Snapshot) {
       pressure_hpa,
       air_temp_f,
       water_temp_f,
+      dew_point_f,
+      visibility_nmi,
+      pressure_tendency_hpa,
+      tide_ft,
       source,
       fetched_at,
       raw_json
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(station, time) DO UPDATE SET
       wind_direction_deg = excluded.wind_direction_deg,
       wind_speed_mps = excluded.wind_speed_mps,
@@ -270,6 +330,10 @@ export function persistSnapshot(snapshot: Snapshot) {
       pressure_hpa = excluded.pressure_hpa,
       air_temp_f = excluded.air_temp_f,
       water_temp_f = excluded.water_temp_f,
+      dew_point_f = excluded.dew_point_f,
+      visibility_nmi = excluded.visibility_nmi,
+      pressure_tendency_hpa = excluded.pressure_tendency_hpa,
+      tide_ft = excluded.tide_ft,
       source = excluded.source,
       fetched_at = excluded.fetched_at,
       raw_json = excluded.raw_json
@@ -351,14 +415,22 @@ export function persistSnapshot(snapshot: Snapshot) {
       average_period_sec,
       mean_wave_direction_deg,
       mean_wave_direction_text,
+      wind_direction_deg,
+      wind_speed_mps,
+      wind_gust_mps,
+      pressure_hpa,
       air_temp_f,
       water_temp_f,
+      dew_point_f,
+      visibility_nmi,
+      pressure_tendency_hpa,
+      tide_ft,
       source,
       fetched_at,
       is_stale,
       raw_json
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(station_id, time) DO UPDATE SET
       station_name = excluded.station_name,
       zone = excluded.zone,
@@ -370,8 +442,16 @@ export function persistSnapshot(snapshot: Snapshot) {
       average_period_sec = excluded.average_period_sec,
       mean_wave_direction_deg = excluded.mean_wave_direction_deg,
       mean_wave_direction_text = excluded.mean_wave_direction_text,
+      wind_direction_deg = excluded.wind_direction_deg,
+      wind_speed_mps = excluded.wind_speed_mps,
+      wind_gust_mps = excluded.wind_gust_mps,
+      pressure_hpa = excluded.pressure_hpa,
       air_temp_f = excluded.air_temp_f,
       water_temp_f = excluded.water_temp_f,
+      dew_point_f = excluded.dew_point_f,
+      visibility_nmi = excluded.visibility_nmi,
+      pressure_tendency_hpa = excluded.pressure_tendency_hpa,
+      tide_ft = excluded.tide_ft,
       source = excluded.source,
       fetched_at = excluded.fetched_at,
       is_stale = excluded.is_stale,
@@ -419,7 +499,8 @@ export function persistSnapshot(snapshot: Snapshot) {
       toJson(snapshot.errors),
       compactJson(snapshot.sound),
       compactJson(snapshot.marine),
-      toJson(snapshot.weather)
+      toJson(snapshot.weather),
+      toJson(compactSnapshot(snapshot))
     );
 
     for (const point of snapshot.sound?.history ?? snapshot.sound?.series ?? []) {
@@ -449,6 +530,10 @@ export function persistSnapshot(snapshot: Snapshot) {
         valueOrNull(point.pressureHpa),
         valueOrNull(point.airTempF),
         valueOrNull(point.waterTempF),
+        valueOrNull(point.dewPointF),
+        valueOrNull(point.visibilityNmi),
+        valueOrNull(point.pressureTendencyHpa),
+        valueOrNull(point.tideFt),
         snapshot.marine?.source ?? "",
         snapshot.generatedAt,
         toJson(point)
@@ -510,8 +595,16 @@ export function persistSnapshot(snapshot: Snapshot) {
           valueOrNull(point.averagePeriodSec),
           valueOrNull(point.meanWaveDirectionDeg),
           valueOrNull(point.meanWaveDirectionText),
+          valueOrNull(point.windDirectionDeg),
+          valueOrNull(point.windSpeedMps),
+          valueOrNull(point.windGustMps),
+          valueOrNull(point.pressureHpa),
           valueOrNull(point.airTempF),
           valueOrNull(point.waterTempF),
+          valueOrNull(point.dewPointF),
+          valueOrNull(point.visibilityNmi),
+          valueOrNull(point.pressureTendencyHpa),
+          valueOrNull(point.tideFt),
           station.source ?? "",
           snapshot.generatedAt,
           isOlderThan(snapshot.generatedAt, point.time, 24) ? 1 : 0,
@@ -526,7 +619,7 @@ export function persistSnapshot(snapshot: Snapshot) {
         snapshot.tide.station?.id ?? "",
         snapshot.tide.station?.name ?? "",
         snapshot.tide.reference?.name ?? "",
-        valueOrNull(snapshot.tide.distanceFromCarovaMiles),
+        valueOrNull(snapshot.tide.distanceFromReferenceMiles ?? snapshot.tide.distanceFromCarovaMiles),
         prediction.time,
         prediction.localTime ?? "",
         prediction.type ?? "",
@@ -540,6 +633,24 @@ export function persistSnapshot(snapshot: Snapshot) {
   });
 
   write();
+}
+
+export function getCachedSnapshot(maxAgeMs: number) {
+  const db = getDb();
+  const row = db.query(`
+    SELECT generated_at AS generatedAt, snapshot_json AS snapshotJson
+    FROM snapshots
+    WHERE snapshot_json IS NOT NULL
+    ORDER BY generated_at DESC
+    LIMIT 1
+  `).get() as { generatedAt: string; snapshotJson: string } | null;
+
+  if (!row?.snapshotJson) return undefined;
+
+  const generatedAtMs = new Date(row.generatedAt).getTime();
+  if (!Number.isFinite(generatedAtMs) || Date.now() - generatedAtMs > maxAgeMs) return undefined;
+
+  return JSON.parse(row.snapshotJson) as Snapshot;
 }
 
 export function getHistory(kind: string, limit = 250) {
@@ -565,8 +676,16 @@ export function getHistory(kind: string, limit = 250) {
         average_period_sec AS averagePeriodSec,
         mean_wave_direction_deg AS meanWaveDirectionDeg,
         mean_wave_direction_text AS meanWaveDirectionText,
+        wind_direction_deg AS windDirectionDeg,
+        wind_speed_mps AS windSpeedMps,
+        wind_gust_mps AS windGustMps,
+        pressure_hpa AS pressureHpa,
         air_temp_f AS airTempF,
         water_temp_f AS waterTempF,
+        dew_point_f AS dewPointF,
+        visibility_nmi AS visibilityNmi,
+        pressure_tendency_hpa AS pressureTendencyHpa,
+        tide_ft AS tideFt,
         source,
         fetched_at AS fetchedAt
       FROM marine_observations
@@ -628,9 +747,18 @@ export function getHistory(kind: string, limit = 250) {
         wave_height_ft AS waveHeightFt,
         dominant_period_sec AS dominantPeriodSec,
         average_period_sec AS averagePeriodSec,
+        mean_wave_direction_deg AS meanWaveDirectionDeg,
         mean_wave_direction_text AS meanWaveDirectionText,
+        wind_direction_deg AS windDirectionDeg,
+        wind_speed_mps AS windSpeedMps,
+        wind_gust_mps AS windGustMps,
+        pressure_hpa AS pressureHpa,
         air_temp_f AS airTempF,
         water_temp_f AS waterTempF,
+        dew_point_f AS dewPointF,
+        visibility_nmi AS visibilityNmi,
+        pressure_tendency_hpa AS pressureTendencyHpa,
+        tide_ft AS tideFt,
         source,
         fetched_at AS fetchedAt,
         is_stale AS isStale

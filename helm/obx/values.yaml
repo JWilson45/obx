@@ -1,0 +1,89 @@
+environment: prod
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/jwilson45/obx-conditions
+  tag: ""
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+container:
+  port: 3000
+  env:
+    NODE_ENV: production
+    PORT: "3000"
+    DB_PATH: /data/obx.sqlite
+  envFromSecret:
+    enabled: false
+    name: ""
+    keys: []
+
+persistence:
+  enabled: true
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  storageClassName: ""
+  mountPath: /data
+
+ingress:
+  enabled: true
+  className: tailscale
+  host: obx
+  path: /
+  pathType: Prefix
+  funnel:
+    enabled: true
+  annotations: {}
+  tls:
+    enabled: true
+
+resources: {}
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+startupProbe:
+  httpGet:
+    path: /
+    port: http
+  failureThreshold: 30
+  periodSeconds: 2
+
+livenessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

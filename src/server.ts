@@ -1,7 +1,8 @@
-import { getDatabaseStats, getHistory, normalizeHistoryLimit, persistSnapshot } from "./db";
+import { getCachedSnapshot, getDatabaseStats, getHistory, normalizeHistoryLimit, persistSnapshot } from "./db";
 
 const PORT = Number(Bun.env.PORT || 3000);
 const USER_AGENT = "obx-conditions/0.1 contact: local-dashboard";
+const SNAPSHOT_CACHE_MS = 2 * 60 * 1000;
 const WEATHERSTEM_STATION = "ccemcarovabeach@currituck.weatherstem.com";
 const CAROVA_BEACH_REFERENCE = {
   name: "Carova Beach oceanfront",
@@ -13,6 +14,7 @@ const VA_NC_LINE_REFERENCE = {
   lat: 36.5506,
   lon: -75.8703
 };
+const CHART_WINDOWS_DAYS = [1, 7, 30] as const;
 
 type Point = {
   time: string;
@@ -42,10 +44,10 @@ const SOURCES = {
 };
 
 const ATLANTIC_TIDE_STATION = {
-  id: "8651370",
-  name: "Duck Pier, NC",
-  lat: 36.1833,
-  lon: -75.7467,
+  id: "8639428",
+  name: "Sandbridge, VA",
+  lat: 36.6917,
+  lon: -75.92,
   datum: "MLLW"
 };
 
@@ -59,6 +61,8 @@ const BUOY_STATIONS: BuoyStationConfig[] = [
   { id: "44100", name: "Duck FRF 26m", lat: 36.258, lon: -75.593, zone: "near-border" },
   { id: "44086", name: "Nags Head, NC", lat: 36.001, lon: -75.421, zone: "southern-reference" }
 ];
+
+let snapshotRefresh: Promise<any> | undefined;
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -153,6 +157,28 @@ function downsample<T>(items: T[], target = 96): T[] {
   return items.filter((_, index) => index % stride === 0).slice(-target);
 }
 
+function recentWindow<T extends { time: string }>(items: T[], days: number, latestTime?: string) {
+  const latestMs = latestTime ? new Date(latestTime).getTime() : new Date(items.at(-1)?.time ?? "").getTime();
+  if (!Number.isFinite(latestMs)) return items;
+  const cutoff = latestMs - days * 24 * 60 * 60 * 1000;
+  return items.filter((item) => new Date(item.time).getTime() >= cutoff);
+}
+
+function seriesByDays<T extends { time: string }>(items: T[], target = 120) {
+  return Object.fromEntries(
+    CHART_WINDOWS_DAYS.map((days) => [String(days), downsample(recentWindow(items, days), target)])
+  );
+}
+
+function rangeByDays<T extends { time: string }>(items: T[], key: keyof T) {
+  return Object.fromEntries(CHART_WINDOWS_DAYS.map((days) => {
+    const values = recentWindow(items, days)
+      .map((item) => item[key])
+      .filter(Number.isFinite) as number[];
+    return [String(days), values.length ? { min: Math.min(...values), max: Math.max(...values) } : undefined];
+  }));
+}
+
 function milesBetween(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
   const earthRadiusMiles = 3958.8;
   const toRad = (value: number) => value * Math.PI / 180;
@@ -212,8 +238,10 @@ async function getSoundLevel() {
       min: Math.min(...allValues),
       max: Math.max(...allValues)
     },
+    rangeByDays: rangeByDays(series, "value"),
     history: series,
-    series: downsample(series, 120),
+    series: downsample(recentWindow(series, 7), 120),
+    seriesByDays: seriesByDays(series, 120),
     source: SOURCES.usgs
   };
 }
@@ -229,6 +257,7 @@ function parseNdbcRealtime(text: string) {
     const waveHeightM = asNumber(cols[8]);
     const airTempC = asNumber(cols[13]);
     const waterTempC = asNumber(cols[14]);
+    const dewPointC = asNumber(cols[15]);
 
     return {
       time: isoUtc(cols.slice(0, 5)),
@@ -242,7 +271,11 @@ function parseNdbcRealtime(text: string) {
       meanWaveDirectionText: directionFromDegrees(asNumber(cols[11])),
       pressureHpa: asNumber(cols[12]),
       airTempF: cToF(airTempC),
-      waterTempF: cToF(waterTempC)
+      waterTempF: cToF(waterTempC),
+      dewPointF: cToF(dewPointC),
+      visibilityNmi: asNumber(cols[16]),
+      pressureTendencyHpa: asNumber(cols[17]),
+      tideFt: asNumber(cols[18])
     };
   });
 
@@ -280,11 +313,13 @@ async function getMarine() {
   ]);
 
   const series = parseNdbcRealtime(realtimeText);
+  const chronologicalSeries = [...series].reverse();
   return {
     station: "44056 - Duck FRF, NC",
     latest: series[0],
     history: series,
-    series: downsample([...series].reverse(), 96),
+    series: downsample(recentWindow(chronologicalSeries, 7), 120),
+    seriesByDays: seriesByDays(chronologicalSeries, 120),
     spectral: parseNdbcSpectral(spectralText),
     source: "https://www.ndbc.noaa.gov/station_page.php?station=44056"
   };
@@ -317,8 +352,9 @@ async function getAtlanticTide() {
 
   return {
     station: ATLANTIC_TIDE_STATION,
-    reference: CAROVA_BEACH_REFERENCE,
+    reference: VA_NC_LINE_REFERENCE,
     distanceFromCarovaMiles: milesBetween(CAROVA_BEACH_REFERENCE, ATLANTIC_TIDE_STATION),
+    distanceFromReferenceMiles: milesBetween(VA_NC_LINE_REFERENCE, ATLANTIC_TIDE_STATION),
     source: `https://tidesandcurrents.noaa.gov/stationhome.html?id=${ATLANTIC_TIDE_STATION.id}`,
     api: apiUrl,
     previous,
@@ -432,15 +468,19 @@ function findWeatherStemSensor(data: unknown, sensorNames: string[]) {
 
 async function getNwsWeather() {
   const point: any = await fetchJson(SOURCES.nwsPoint);
+  const forecastUrl = point?.properties?.forecast;
   const forecastHourlyUrl = point?.properties?.forecastHourly;
   const stationsUrl = point?.properties?.observationStations;
 
-  const [forecast, stations]: any[] = await Promise.all([
-    fetchJson(forecastHourlyUrl),
+  const [forecast, hourlyForecast, stations]: any[] = await Promise.all([
+    forecastUrl ? fetchJson(forecastUrl) : undefined,
+    forecastHourlyUrl ? fetchJson(forecastHourlyUrl) : undefined,
     fetchJson(stationsUrl)
   ]);
 
-  const firstPeriod = forecast?.properties?.periods?.[0];
+  const periods = hourlyForecast?.properties?.periods ?? [];
+  const dailyPeriods = forecast?.properties?.periods ?? [];
+  const firstPeriod = periods[0] ?? dailyPeriods[0];
   const firstStation = stations?.features?.[0]?.properties?.stationIdentifier;
   const latestObs = firstStation
     ? await fetchJson<any>(`https://api.weather.gov/stations/${firstStation}/observations/latest`)
@@ -458,7 +498,28 @@ async function getNwsWeather() {
     summary: props.textDescription || firstPeriod?.shortForecast,
     forecastTemperatureF: asNumber(firstPeriod?.temperature),
     forecastWind: `${firstPeriod?.windDirection ?? ""} ${firstPeriod?.windSpeed ?? ""}`.trim(),
-    precipChance: asNumber(firstPeriod?.probabilityOfPrecipitation?.value)
+    precipChance: asNumber(firstPeriod?.probabilityOfPrecipitation?.value),
+    forecast: periods.slice(0, 8).map((period: any) => ({
+      time: period.startTime,
+      temperatureF: asNumber(period.temperature),
+      shortForecast: period.shortForecast,
+      windSpeed: period.windSpeed,
+      windDirection: period.windDirection,
+      precipChance: asNumber(period.probabilityOfPrecipitation?.value)
+    })),
+    dailyForecast: dailyPeriods
+      .filter((period: any) => period.isDaytime)
+      .slice(0, 5)
+      .map((period: any) => ({
+        name: period.name,
+        time: period.startTime,
+        temperatureF: asNumber(period.temperature),
+        shortForecast: period.shortForecast,
+        detailedForecast: period.detailedForecast,
+        windSpeed: period.windSpeed,
+        windDirection: period.windDirection,
+        precipChance: asNumber(period.probabilityOfPrecipitation?.value)
+    }))
   };
 }
 
@@ -489,13 +550,15 @@ async function getWeather() {
     wind,
     precipChance: nwsData?.precipChance,
     summary: nwsData?.summary,
+    forecast: nwsData?.forecast,
+    dailyForecast: nwsData?.dailyForecast,
     note: Bun.env.WEATHERSTEM_API_KEY
       ? "WeatherSTEM API key is configured; NWS fills forecast-only fields."
       : "WeatherSTEM public portal provides the fire-station temperature. Full station sensors require a WeatherSTEM API key; NWS point forecast and nearest official observations fill the remaining fields."
   };
 }
 
-async function getSnapshot() {
+async function getLiveSnapshot() {
   const errors: ApiErrorMap = {};
   const [sound, marine, weather, buoys, tide] = await Promise.allSettled([
     getSoundLevel(),
@@ -533,6 +596,35 @@ async function getSnapshot() {
     marine: omitHistory(snapshot.marine),
     buoys: omitBuoyHistory(snapshot.buoys)
   };
+}
+
+function withCacheMetadata(snapshot: any, cacheStatus: "fresh" | "cached") {
+  const generatedAtMs = new Date(snapshot.generatedAt).getTime();
+  const ageSeconds = Number.isFinite(generatedAtMs)
+    ? Math.max(0, Math.round((Date.now() - generatedAtMs) / 1000))
+    : undefined;
+  return {
+    ...snapshot,
+    cache: {
+      status: cacheStatus,
+      maxAgeSeconds: Math.round(SNAPSHOT_CACHE_MS / 1000),
+      ageSeconds,
+      nextRefreshAt: Number.isFinite(generatedAtMs)
+        ? new Date(generatedAtMs + SNAPSHOT_CACHE_MS).toISOString()
+        : undefined
+    }
+  };
+}
+
+async function getSnapshot() {
+  const cached = getCachedSnapshot(SNAPSHOT_CACHE_MS);
+  if (cached) return withCacheMetadata(cached, "cached");
+
+  snapshotRefresh ??= getLiveSnapshot().finally(() => {
+    snapshotRefresh = undefined;
+  });
+
+  return withCacheMetadata(await snapshotRefresh, "fresh");
 }
 
 if (Bun.argv.includes("--once")) {

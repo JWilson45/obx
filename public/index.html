@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OBX Conditions</title>
+    <link rel="icon" type="image/png" href="/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
@@ -11,12 +13,11 @@
     <main class="shell">
       <section class="hero">
         <div>
-          <p class="eyebrow">Outer Banks, NC</p>
+          <div class="brand-kicker">
+            <img class="brand-icon" src="/images/obx-icon.png" width="42" height="42" alt="" />
+            <p class="eyebrow">Outer Banks, NC</p>
+          </div>
           <h1>Sound, surf, and weather at a glance.</h1>
-          <p class="lede">
-            Live conditions for Currituck Sound at Corolla, Duck FRF offshore waves,
-            Carova Atlantic tides, and Carova Beach Fire Department area weather.
-          </p>
         </div>
         <div class="hero-panel">
           <span class="status-dot" id="system-status-dot"></span>
@@ -47,7 +48,12 @@
             <span class="trend-pill" id="sound-trend">--</span>
           </div>
           <div class="chart-wrap">
-            <svg id="sound-chart" role="img" aria-label="30 day water level chart"></svg>
+            <svg id="sound-chart" role="img" aria-label="7 day water level chart"></svg>
+          </div>
+          <div class="chart-controls" id="sound-chart-controls" aria-label="Water level chart range">
+            <button type="button" data-days="1" aria-pressed="false">1d</button>
+            <button type="button" data-days="7" aria-pressed="true">7d</button>
+            <button type="button" data-days="30" aria-pressed="false">30d</button>
           </div>
           <dl class="stat-list">
             <div>
@@ -55,7 +61,7 @@
               <dd id="sound-24h">--</dd>
             </div>
             <div>
-              <dt>30d range</dt>
+              <dt id="sound-range-label">7d range</dt>
               <dd id="sound-range">--</dd>
             </div>
             <div>
@@ -86,7 +92,12 @@
             </div>
           </div>
           <div class="chart-wrap compact">
-            <svg id="wave-chart" role="img" aria-label="Recent wave height chart"></svg>
+            <svg id="wave-chart" role="img" aria-label="7 day wave height chart"></svg>
+          </div>
+          <div class="chart-controls light" id="wave-chart-controls" aria-label="Wave height chart range">
+            <button type="button" data-days="1" aria-pressed="false">1d</button>
+            <button type="button" data-days="7" aria-pressed="true">7d</button>
+            <button type="button" data-days="30" aria-pressed="false">30d</button>
           </div>
           <dl class="stat-list">
             <div>
@@ -102,6 +113,20 @@
               <dd id="marine-air">--</dd>
             </div>
           </dl>
+          <div class="condition-strip light">
+            <div>
+              <span>Wind</span>
+              <strong id="marine-wind">--</strong>
+            </div>
+            <div>
+              <span>Pressure</span>
+              <strong id="marine-pressure">--</strong>
+            </div>
+            <div>
+              <span>Dew point</span>
+              <strong id="marine-dew">--</strong>
+            </div>
+          </div>
         </article>
       </section>
 
@@ -145,7 +170,7 @@
               <p class="eyebrow">Carova Atlantic</p>
               <h2>Tide guidance</h2>
             </div>
-            <a class="source-link" href="https://tidesandcurrents.noaa.gov/stationhome.html?id=8651370" target="_blank" rel="noreferrer">NOAA 8651370</a>
+            <a class="source-link" href="https://tidesandcurrents.noaa.gov/stationhome.html?id=8639428" target="_blank" rel="noreferrer">NOAA 8639428</a>
           </div>
           <div class="tide-current">
             <div>
@@ -169,6 +194,9 @@
               <dd id="tide-datum">--</dd>
             </div>
           </dl>
+          <div class="tide-chart-wrap">
+            <svg id="tide-chart" role="img" aria-label="High and low tide curve"></svg>
+          </div>
           <div class="tide-list" id="tide-list"></div>
           <p class="note" id="tide-note">Loading Atlantic tide predictions...</p>
         </article>
@@ -206,6 +234,17 @@
               <dd id="weather-rain">--</dd>
             </div>
           </dl>
+          <div class="forecast-panel">
+            <div class="mini-heading">
+              <p class="eyebrow">Carova 4x4 forecast</p>
+              <h3 id="forecast-title">Next few hours</h3>
+            </div>
+            <div class="forecast-controls" id="forecast-controls" aria-label="Forecast range">
+              <button type="button" data-forecast-mode="hourly" aria-pressed="true">Hours</button>
+              <button type="button" data-forecast-mode="daily" aria-pressed="false">Days</button>
+            </div>
+            <div class="forecast-list" id="forecast-list"></div>
+          </div>
           <p class="note" id="weather-note">--</p>
         </article>
 
@@ -215,8 +254,8 @@
           <ul class="source-list">
             <li><strong>Sound level:</strong> USGS instantaneous gage height for Currituck Sound on east bank at Corolla.</li>
             <li><strong>Ocean data:</strong> NOAA NDBC Duck FRF realtime and spectral feeds, plus northern/offshore buoy water-temperature stations.</li>
-            <li><strong>Atlantic tides:</strong> NOAA CO-OPS high/low predictions from Duck Pier, the closest verified Atlantic tide station for Carova.</li>
-            <li><strong>Local weather:</strong> Currituck WeatherSTEM Carova fire station public portal, with NWS point forecast fallback.</li>
+            <li><strong>Atlantic tides:</strong> NOAA CO-OPS high/low predictions from Sandbridge, the closest tide-prediction station found for the VA/NC line.</li>
+            <li><strong>Local weather:</strong> Currituck WeatherSTEM Carova fire station public portal, with NWS observations and hourly forecast fallback.</li>
           </ul>
         </article>
       </section>

@@ -1,0 +1,35 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "obx.fullname" . }}
+  labels:
+    {{- include "obx.labels" . | nindent 4 }}
+  {{- if or .Values.ingress.annotations .Values.ingress.funnel.enabled }}
+  annotations:
+    {{- if .Values.ingress.funnel.enabled }}
+    tailscale.com/funnel: "true"
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.path | quote }}
+            pathType: {{ .Values.ingress.pathType }}
+            backend:
+              service:
+                name: {{ include "obx.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}

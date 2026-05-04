@@ -1,0 +1,11 @@
+OBX Conditions is configured for the {{ .Values.environment }} environment.
+
+Tailscale ingress:
+  Host first label: {{ .Values.ingress.host }}
+  Ingress class: {{ .Values.ingress.className }}
+  Funnel enabled: {{ .Values.ingress.funnel.enabled }}
+
+Tailscale prerequisites are managed outside this chart:
+  - Tailscale Kubernetes Operator installed in the cluster.
+  - MagicDNS and HTTPS enabled on the tailnet.
+  - Tailnet policy grants the funnel node attribute to the operator proxy tag, commonly tag:k8s.

@@ -9,9 +9,10 @@ The current app is intentionally small: a Bun server, static frontend assets, li
 - **Currituck Sound level** from USGS gage height at Corolla, useful because inland water levels here are wind-driven rather than tide-driven in a simple way.
 - **Duck FRF surf conditions** from NOAA NDBC station `44056`, including wave height, dominant period, water temperature, air temperature, swell, and wind-wave breakdown.
 - **Northern OBX buoy water-temperature map** with nearby, northern, and offshore NOAA stations plotted around the VA/NC line oceanfront.
-- **Carova Atlantic tide guidance** from NOAA CO-OPS high/low predictions at Duck Pier, the closest verified Atlantic tide station currently used for Carova Beach.
-- **Carova Beach Fire Department weather** using the Currituck WeatherSTEM public portal for station temperature and NWS fallback data for forecast/observation fields.
+- **Carova Atlantic tide guidance** from NOAA CO-OPS high/low predictions at Sandbridge, VA, the closest NOAA tide-prediction station found for the VA/NC line.
+- **Carova Beach Fire Department weather and short forecast** using the Currituck WeatherSTEM public portal for station temperature and NWS fallback data for forecast/observation fields.
 - **Local history** persisted to SQLite so repeated live fetches build a local dataset over time.
+- **Two-minute source caching** so dashboard refreshes read the latest SQLite snapshot until the external feeds are due for another pull.
 
 ## Tech Stack
 
@@ -61,6 +62,8 @@ Runtime-created local database files live under `data/` by default and are ignor
 - Realtime feed: `https://www.ndbc.noaa.gov/data/realtime2/44056.txt`
 - Spectral feed: `https://www.ndbc.noaa.gov/data/realtime2/44056.spec`
 
+The realtime parser stores wave height, dominant/average period, mean wave direction, wind direction/speed/gust, pressure, air temperature, water temperature, dew point, visibility, pressure tendency, and tide when those columns are reported. The dashboard surfaces the most decision-useful subset for Carova 4x4 travel: waves, water temperature, period/direction, wind, pressure, and dew point.
+
 ### Buoy Temperature Map
 
 The buoy map is centered conceptually on the VA/NC line oceanfront. It uses station coordinates from NOAA, renders them on a Leaflet map with OpenStreetMap tiles, and plots latest available water temperature.
@@ -83,20 +86,20 @@ Map markers fade when the latest station reading is older than 24 hours.
 ### Atlantic Tides
 
 - Source: NOAA Center for Operational Oceanographic Products and Services
-- Station: `8651370`
-- Name: Duck Pier, NC
+- Station: `8639428`
+- Name: Sandbridge, VA
 - Data used: high/low tide predictions in feet relative to MLLW
 - API: `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter`
-- Station page: `https://tidesandcurrents.noaa.gov/stationhome.html?id=8651370`
+- Station page: `https://tidesandcurrents.noaa.gov/stationhome.html?id=8639428`
 
-The dashboard labels this as tide guidance because Duck Pier is roughly 24 miles south of the Carova oceanfront reference point. It is the closest verified NOAA Atlantic tide station currently wired into the MVP.
+The dashboard labels this as tide guidance because Sandbridge is a NOAA subordinate tide-prediction station rather than an active NWLON station. It is roughly 10 miles north of the VA/NC line oceanfront and roughly 13 miles from the Carova oceanfront reference point, making it closer to Carova than Duck Pier for high/low tide guidance.
 
 ### Carova Weather
 
 - Source: Currituck WeatherSTEM public portal
 - Station: CCEM Carova Beach Fire Department
 - Public station page: `https://currituck.weatherstem.com/ccemcarovabeach`
-- Fallback/enrichment: National Weather Service API point forecast/nearest official observations near Carova
+- Fallback/enrichment: National Weather Service API point forecast, hourly forecast, and nearest official observations near Carova
 - Note: Full WeatherSTEM sensor API access requires an API key.
 
 ## Running Locally
@@ -143,7 +146,7 @@ When `WEATHERSTEM_API_KEY` is not set, the app still works by using public Weath
 
 Fetches live data, persists it to SQLite, and returns the current dashboard payload.
 
-This endpoint intentionally returns lightweight chart/map data. Full source histories are used for persistence but omitted from the response.
+This endpoint returns the latest SQLite snapshot when it is less than two minutes old. When the cached snapshot is older than two minutes, the server refreshes the external sources, persists the new data, and returns that fresh snapshot. Full source histories are used for persistence but omitted from the response.
 
 ### `GET /api/history`
 
@@ -240,7 +243,7 @@ bun -e "import { getDatabaseStats } from './src/db.ts'; console.log(JSON.stringi
 
 The frontend is deliberately framework-free:
 
-- `public/app.js` polls `/api/snapshot` every 5 minutes.
+- `public/app.js` polls `/api/snapshot` every 2 minutes.
 - Sparkline charts are rendered as inline SVG paths.
 - The buoy map uses Leaflet with OpenStreetMap tiles, station-coordinate markers, popups, and a one-mile VA/NC-line reference circle.
 - The visual design uses glassy cards over a generated OBX background with readability overlays.
@@ -255,7 +258,6 @@ If the UI grows, likely next steps are:
 
 - Add NOAA CO-OPS tide/current/water temperature stations where useful.
 - Add wind direction overlays for sound-level interpretation.
-- Add cached fetch windows to avoid hitting live sources on every dashboard refresh.
 - Add historical charts backed by SQLite instead of only current-source windows.
 - Add admin controls for station inclusion/exclusion.
 - Add station health indicators and last-success timestamps.
@@ -266,4 +268,4 @@ If the UI grows, likely next steps are:
 - The map uses OpenStreetMap tiles from `tile.openstreetmap.org` and Leaflet assets from `unpkg.com`; if those browser-side assets are unavailable, the station list still renders.
 - NOAA stations may report `MM` for missing values; parsers convert those to empty fields.
 - `44100` often has older data; it is retained because it is useful when reporting, but stale state is shown.
-- The app currently persists on every `/api/snapshot` request. If traffic increases, add a short server-side cache interval.
+- `/api/snapshot` serves the newest SQLite snapshot for two minutes before refreshing external sources.

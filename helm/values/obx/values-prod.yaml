@@ -1,0 +1,14 @@
+environment: prod
+
+image:
+  repository: ghcr.io/jwilson45/obx-conditions
+  tag: ""
+
+ingress:
+  host: obx
+  funnel:
+    enabled: true
+
+persistence:
+  enabled: true
+  size: 1Gi
