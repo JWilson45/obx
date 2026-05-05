@@ -13,6 +13,7 @@ type Snapshot = {
 };
 
 const DB_PATH = Bun.env.DB_PATH || "data/obx.sqlite";
+const SNAPSHOT_RETENTION_DAYS = Math.max(Number(Bun.env.SNAPSHOT_RETENTION_DAYS || 14), 1);
 let db: Database | undefined;
 
 function valueOrNull(value: unknown) {
@@ -485,6 +486,11 @@ export function persistSnapshot(snapshot: Snapshot) {
       fetched_at = excluded.fetched_at,
       raw_json = excluded.raw_json
   `);
+  const pruneSnapshots = db.prepare(`
+    DELETE FROM snapshots
+    WHERE generated_at < ?
+      AND generated_at != (SELECT MAX(generated_at) FROM snapshots)
+  `);
 
   const write = db.transaction(() => {
     insertSnapshot.run(
@@ -629,6 +635,13 @@ export function persistSnapshot(snapshot: Snapshot) {
         snapshot.generatedAt,
         toJson(prediction)
       );
+    }
+
+    const retentionCutoff = new Date(
+      new Date(snapshot.generatedAt).getTime() - SNAPSHOT_RETENTION_DAYS * 24 * 60 * 60 * 1000
+    );
+    if (Number.isFinite(retentionCutoff.getTime())) {
+      pruneSnapshots.run(retentionCutoff.toISOString());
     }
   });
 

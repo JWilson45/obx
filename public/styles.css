@@ -169,6 +169,11 @@ h3 {
   box-shadow: 0 0 0 8px rgba(47, 125, 92, 0.15);
 }
 
+.status-dot.stale {
+  background: #9b2f1f;
+  box-shadow: 0 0 0 8px rgba(155, 47, 31, 0.16);
+}
+
 .panel-label {
   margin: 0 0 4px;
   color: var(--muted);

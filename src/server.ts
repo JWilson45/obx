@@ -1,4 +1,5 @@
 import { getCachedSnapshot, getDatabaseStats, getHistory, normalizeHistoryLimit, persistSnapshot } from "./db";
+import { stat } from "node:fs/promises";
 
 const PORT = Number(Bun.env.PORT || 3000);
 const USER_AGENT = "obx-conditions/0.1 contact: local-dashboard";
@@ -64,17 +65,33 @@ const BUOY_STATIONS: BuoyStationConfig[] = [
 
 let snapshotRefresh: Promise<any> | undefined;
 
-function json(data: unknown, status = 200) {
+function json(data: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store"
+      "cache-control": "no-store",
+      ...headers
     }
   });
 }
 
-async function publicAsset(pathname: string) {
+function assetHeaders(pathname: string, stats: { size: number; mtimeMs: number }) {
+  const isHtml = pathname === "/" || pathname.endsWith(".html");
+  const isImage = /\.(?:png|jpg|jpeg|webp|gif|ico|svg)$/i.test(pathname);
+  const etag = `"${stats.size.toString(16)}-${Math.round(stats.mtimeMs).toString(16)}"`;
+  return {
+    etag,
+    "cache-control": isHtml
+      ? "no-cache"
+      : isImage
+        ? "public, max-age=86400, stale-while-revalidate=604800"
+        : "public, max-age=0, must-revalidate",
+    "last-modified": new Date(stats.mtimeMs).toUTCString()
+  };
+}
+
+async function publicAsset(request: Request, pathname: string) {
   const decoded = decodeURIComponent(pathname);
   if (decoded.includes("..") || decoded.includes("\\")) {
     return undefined;
@@ -83,7 +100,14 @@ async function publicAsset(pathname: string) {
   const filePath = decoded === "/" ? "public/index.html" : `public${decoded}`;
   const file = Bun.file(filePath);
   if (!(await file.exists())) return undefined;
-  return new Response(file);
+  const headers = assetHeaders(decoded, await stat(filePath));
+  if (request.headers.get("if-none-match") === headers.etag) {
+    return new Response(null, {
+      status: 304,
+      headers
+    });
+  }
+  return new Response(file, { headers });
 }
 
 async function fetchText(url: string) {
@@ -656,7 +680,9 @@ Bun.serve({
 
     if (url.pathname === "/api/snapshot") {
       try {
-        return json(await getSnapshot());
+        return json(await getSnapshot(), 200, {
+          "cache-control": "private, max-age=120, stale-while-revalidate=300"
+        });
       } catch (error) {
         return json({ error: error instanceof Error ? error.message : "Unknown server error" }, 500);
       }
@@ -677,7 +703,7 @@ Bun.serve({
       return json(getDatabaseStats());
     }
 
-    const staticResponse = await publicAsset(url.pathname);
+    const staticResponse = await publicAsset(request, url.pathname);
     if (staticResponse) {
       return staticResponse;
     }

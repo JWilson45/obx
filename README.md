@@ -136,6 +136,7 @@ Supported variables:
 | --- | --- | --- |
 | `PORT` | `3000` | Local HTTP server port |
 | `DB_PATH` | `data/obx.sqlite` | SQLite database path |
+| `SNAPSHOT_RETENTION_DAYS` | `14` | Days of compact dashboard snapshots to retain |
 | `WEATHERSTEM_API_KEY` | empty | Optional WeatherSTEM API access |
 
 When `WEATHERSTEM_API_KEY` is not set, the app still works by using public WeatherSTEM temperature text plus NWS weather data.
@@ -199,7 +200,7 @@ Tables:
 | `tide_predictions` | NOAA CO-OPS high/low Atlantic tide predictions |
 | `weather_observations` | Weather snapshots for Carova area |
 
-Upserts are idempotent for source observations, so repeated polling does not duplicate the same station/time rows.
+Upserts are idempotent for source observations, so repeated polling does not duplicate the same station/time rows. Compact dashboard snapshots are pruned by `SNAPSHOT_RETENTION_DAYS`; normalized history tables are retained.
 
 Local database files are ignored:
 

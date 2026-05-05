@@ -62,8 +62,13 @@ const chartState = {
   soundDays: 7,
   waveDays: 7,
   forecastMode: "hourly",
-  data: null
+  data: null,
+  usingStoredSnapshot: false,
+  refreshError: null
 };
+
+const SNAPSHOT_STORAGE_KEY = "obx-conditions:snapshot:v1";
+const STALE_SNAPSHOT_MS = 30 * 60 * 1000;
 
 const fmt = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -85,6 +90,58 @@ const signed = (value, unit) => {
 
 function setText(node, value) {
   if (node) node.textContent = value;
+}
+
+function ageLabelFromMs(ageMs) {
+  if (!Number.isFinite(ageMs) || ageMs < 0) return "unknown age";
+  const totalSeconds = Math.floor(ageMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  const hours = Math.floor(minutes / 60);
+  if (hours > 0) return `${hours}h ${minutes % 60}m old`;
+  if (minutes > 0) return `${minutes}m ${seconds}s old`;
+  return `${seconds}s old`;
+}
+
+function updateCacheStatus() {
+  const data = chartState.data;
+  if (!data?.generatedAt) return;
+
+  const generatedAt = new Date(data.generatedAt);
+  const ageMs = Date.now() - generatedAt.getTime();
+  const isStale = ageMs >= STALE_SNAPSHOT_MS;
+  const errors = data.errors || {};
+  const hasErrors = Object.keys(errors).length > 0;
+  const cacheLabel = chartState.usingStoredSnapshot || data.cache?.status === "cached" ? "cached" : "fresh";
+
+  els.statusDot?.classList.toggle("ok", !isStale && !hasErrors && !chartState.refreshError);
+  els.statusDot?.classList.toggle("stale", isStale);
+
+  setText(els.status, isStale
+    ? "Data stale"
+    : chartState.refreshError
+      ? "Showing cached data"
+      : hasErrors
+        ? "Partial live data"
+        : "All live feeds loaded");
+  setText(els.lastUpdated, `Updated ${fmt.format(generatedAt)} · ${cacheLabel} · ${ageLabelFromMs(ageMs)}`);
+}
+
+function readStoredSnapshot() {
+  try {
+    const snapshot = JSON.parse(localStorage.getItem(SNAPSHOT_STORAGE_KEY) || "null");
+    return snapshot && snapshot.generatedAt ? snapshot : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSnapshot(snapshot) {
+  try {
+    localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Storage can be unavailable in private browsing or constrained devices.
+  }
 }
 
 function escapeHtml(value) {
@@ -703,10 +760,7 @@ function render(data) {
   const { sound, marine, weather, buoys, tide, errors } = data;
   chartState.data = data;
 
-  setText(els.status, errors && Object.keys(errors).length ? "Partial live data" : "All live feeds loaded");
-  els.statusDot.classList.toggle("ok", !(errors && Object.keys(errors).length));
-  const cacheLabel = data.cache?.status === "cached" ? `cached ${data.cache.ageSeconds ?? 0}s` : "fresh";
-  setText(els.lastUpdated, `Updated ${fmt.format(new Date(data.generatedAt))} · ${cacheLabel}`);
+  updateCacheStatus();
   renderAlerts(errors);
 
   if (sound?.latest) {
@@ -770,17 +824,37 @@ els.forecastControls?.querySelectorAll("button[data-forecast-mode]").forEach((bu
 });
 
 async function load() {
+  const storedSnapshot = readStoredSnapshot();
+  if (storedSnapshot && !chartState.data) {
+    chartState.usingStoredSnapshot = true;
+    chartState.refreshError = null;
+    render(storedSnapshot);
+  }
+
   try {
     const response = await fetch("/api/snapshot", { headers: { accept: "application/json" } });
     if (!response.ok) throw new Error(`Dashboard API returned ${response.status}`);
-    render(await response.json());
+    const snapshot = await response.json();
+    writeStoredSnapshot(snapshot);
+    chartState.usingStoredSnapshot = false;
+    chartState.refreshError = null;
+    render(snapshot);
   } catch (error) {
-    setText(els.status, "Unable to load data");
-    setText(els.lastUpdated, error.message);
-    els.statusDot.classList.remove("ok");
-    renderAlerts({ dashboard: error.message });
+    if (!storedSnapshot) {
+      chartState.refreshError = error.message;
+      setText(els.status, "Unable to load data");
+      setText(els.lastUpdated, error.message);
+      els.statusDot.classList.remove("ok");
+      els.statusDot.classList.remove("stale");
+      renderAlerts({ dashboard: error.message });
+    } else {
+      chartState.usingStoredSnapshot = true;
+      chartState.refreshError = error.message;
+      updateCacheStatus();
+      renderAlerts({ dashboard: `Refresh failed: ${error.message}` });
+    }
   }
 }
 
 load();
-setInterval(load, 2 * 60 * 1000);
+setInterval(updateCacheStatus, 1000);

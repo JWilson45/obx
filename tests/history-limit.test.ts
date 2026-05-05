@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 Bun.env.DB_PATH = `/private/tmp/obx-conditions-test-${process.pid}.sqlite`;
 
-const { getCachedSnapshot, normalizeHistoryLimit, persistSnapshot } = await import("../src/db");
+const { getCachedSnapshot, getDatabaseStats, getHistory, normalizeHistoryLimit, persistSnapshot } = await import("../src/db");
 
 describe("normalizeHistoryLimit", () => {
   test("falls back when the limit is not numeric", () => {
@@ -69,5 +69,37 @@ describe("getCachedSnapshot", () => {
     expect(cached?.marine?.history).toBeUndefined();
     expect(cached?.buoys?.stations?.[0]?.history).toBeUndefined();
     expect(cached?.tide?.station?.id).toBe("8639428");
+  });
+});
+
+describe("snapshot retention", () => {
+  test("prunes old dashboard snapshots without deleting normalized history", () => {
+    const oldSnapshot = {
+      generatedAt: "2026-04-01T12:00:00.000Z",
+      sound: {
+        latest: { time: "2026-04-01T12:00:00.000Z", value: 1.1 },
+        history: [{ time: "2026-04-01T12:00:00.000Z", value: 1.1 }],
+        source: "test"
+      },
+      errors: {}
+    };
+    const currentSnapshot = {
+      generatedAt: "2026-05-04T12:00:00.000Z",
+      sound: {
+        latest: { time: "2026-05-04T12:00:00.000Z", value: 1.2 },
+        history: [{ time: "2026-05-04T12:00:00.000Z", value: 1.2 }],
+        source: "test"
+      },
+      errors: {}
+    };
+
+    persistSnapshot(oldSnapshot);
+    persistSnapshot(currentSnapshot);
+
+    expect(getDatabaseStats().snapshots).toEqual({ count: 2 });
+    const snapshots = getHistory("snapshots", 10).map((row: any) => row.generatedAt);
+    expect(snapshots).toContain(currentSnapshot.generatedAt);
+    expect(snapshots).not.toContain(oldSnapshot.generatedAt);
+    expect(getHistory("sound", 10).map((row: any) => row.time)).toContain(oldSnapshot.sound.latest.time);
   });
 });
