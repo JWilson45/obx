@@ -46,7 +46,10 @@ const els = {
   buoyList: document.querySelector("#buoy-list"),
   buoyCount: document.querySelector("#buoy-count"),
   buoyRange: document.querySelector("#buoy-range"),
-  buoyNote: document.querySelector("#buoy-note")
+  buoyNote: document.querySelector("#buoy-note"),
+  sourcesOpen: document.querySelector("#sources-open"),
+  sourcesClose: document.querySelector("#sources-close"),
+  sourcesDialog: document.querySelector("#sources-dialog")
 };
 
 const mapState = {
@@ -69,6 +72,7 @@ const chartState = {
 
 const SNAPSHOT_STORAGE_KEY = "obx-conditions:snapshot:v1";
 const STALE_SNAPSHOT_MS = 30 * 60 * 1000;
+const VISTA_WEBCAM_STREAM = "2O09J4QSEV";
 
 const fmt = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -90,6 +94,49 @@ const signed = (value, unit) => {
 
 function setText(node, value) {
   if (node) node.textContent = value;
+}
+
+function openSourcesDialog() {
+  if (!els.sourcesDialog) return;
+  if (typeof els.sourcesDialog.showModal === "function") {
+    els.sourcesDialog.showModal();
+  } else {
+    els.sourcesDialog.setAttribute("open", "");
+  }
+}
+
+function closeSourcesDialog() {
+  if (!els.sourcesDialog) return;
+  if (typeof els.sourcesDialog.close === "function") {
+    els.sourcesDialog.close();
+  } else {
+    els.sourcesDialog.removeAttribute("open");
+  }
+}
+
+function initVistaWebcam(retries = 20) {
+  const container = document.querySelector(`[data-vistawebcams-stream="${VISTA_WEBCAM_STREAM}"]`);
+  if (!container || container.dataset.vistawebcamsInitialized === "true" || container._vistawebcamsPlayer) return;
+
+  const Player = window.VistaWebcams?.Player;
+  if (!Player) {
+    if (retries > 0) window.setTimeout(() => initVistaWebcam(retries - 1), 250);
+    return;
+  }
+
+  try {
+    const player = new Player(container, {
+      streamName: VISTA_WEBCAM_STREAM,
+      autoplay: "muted",
+      controls: true
+    });
+    container._vistawebcamsPlayer = player;
+    player.init().catch((error) => {
+      console.error("[OBX] Failed to initialize Vista webcam", error);
+    });
+  } catch (error) {
+    console.error("[OBX] Failed to create Vista webcam player", error);
+  }
 }
 
 function ageLabelFromMs(ageMs) {
@@ -823,6 +870,12 @@ els.forecastControls?.querySelectorAll("button[data-forecast-mode]").forEach((bu
   });
 });
 
+els.sourcesOpen?.addEventListener("click", openSourcesDialog);
+els.sourcesClose?.addEventListener("click", closeSourcesDialog);
+els.sourcesDialog?.addEventListener("click", (event) => {
+  if (event.target === els.sourcesDialog) closeSourcesDialog();
+});
+
 async function load() {
   const storedSnapshot = readStoredSnapshot();
   if (storedSnapshot && !chartState.data) {
@@ -857,4 +910,5 @@ async function load() {
 }
 
 load();
+initVistaWebcam();
 setInterval(updateCacheStatus, 1000);

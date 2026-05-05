@@ -222,10 +222,16 @@ h3 {
 }
 
 .secondary-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  margin-bottom: 20px;
 }
 
 .map-grid {
+  margin-bottom: 20px;
+}
+
+.webcam-grid {
   margin-bottom: 20px;
 }
 
@@ -529,11 +535,11 @@ dd {
 }
 
 .weather-current .metric-value {
-  font-size: clamp(4.2rem, 8vw, 6.4rem);
+  font-size: clamp(3.4rem, 6vw, 5.8rem);
 }
 
 .tide-current .metric-value {
-  font-size: clamp(4rem, 7vw, 6rem);
+  font-size: clamp(3.4rem, 6vw, 5.7rem);
 }
 
 .tide-current p {
@@ -587,6 +593,166 @@ dd {
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.34);
   line-height: 1.5;
+}
+
+.sources-fab {
+  display: block;
+  width: fit-content;
+  min-height: 48px;
+  margin: 0 0 0 auto;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  border-radius: 999px;
+  color: var(--paper);
+  background: var(--blue-dark);
+  box-shadow: 0 18px 42px rgba(9, 57, 68, 0.28);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.sources-fab:hover,
+.sources-fab:focus-visible {
+  background: var(--blue);
+  outline: 3px solid rgba(217, 103, 43, 0.28);
+  outline-offset: 3px;
+}
+
+.sources-dialog {
+  width: min(1040px, calc(100% - 28px));
+  max-height: min(760px, calc(100dvh - 32px));
+  margin: auto;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 28px;
+  color: var(--ink);
+  background:
+    linear-gradient(135deg, rgba(255, 250, 240, 0.96), rgba(230, 243, 237, 0.94)),
+    var(--paper);
+  box-shadow: 0 28px 90px rgba(9, 57, 68, 0.34);
+}
+
+.sources-dialog::backdrop {
+  background: rgba(9, 57, 68, 0.48);
+  backdrop-filter: blur(6px);
+}
+
+.sources-dialog-inner {
+  max-height: inherit;
+  overflow: auto;
+  padding: clamp(20px, 3vw, 30px);
+}
+
+.sources-dialog-header {
+  display: flex;
+  gap: 18px;
+  align-items: start;
+  justify-content: space-between;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sources-close {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--blue-dark);
+  background: rgba(255, 255, 255, 0.5);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.sources-close:hover,
+.sources-close:focus-visible {
+  border-color: rgba(15, 93, 109, 0.34);
+  background: rgba(255, 255, 255, 0.8);
+  outline: none;
+}
+
+.sources-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.source-panel {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.source-panel h3 {
+  font-size: 1.28rem;
+  line-height: 1.05;
+}
+
+.source-panel ul {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.source-panel li {
+  color: #41504c;
+  font-size: 0.9rem;
+  line-height: 1.48;
+}
+
+.source-panel strong {
+  color: var(--ink);
+}
+
+.webcam-card {
+  background:
+    linear-gradient(135deg, rgba(255, 250, 240, 0.9), rgba(230, 243, 237, 0.82)),
+    rgba(255, 250, 240, 0.78);
+}
+
+.webcam-player-wrap {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  margin-top: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  border-radius: 28px;
+  background:
+    linear-gradient(135deg, rgba(9, 57, 68, 0.96), rgba(15, 93, 109, 0.86)),
+    #093944;
+  box-shadow: inset 0 0 0 1px rgba(19, 36, 34, 0.08);
+}
+
+.webcam-player {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 320px;
+  background: #093944;
+}
+
+.webcam-player .video-js,
+.webcam-player video {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.webcam-player > * {
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .condition-strip {
@@ -1116,7 +1282,8 @@ dd {
   .hero,
   .priority-grid,
   .secondary-grid,
-  .buoy-layout {
+  .buoy-layout,
+  .sources-modal-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1174,6 +1341,10 @@ dd {
     min-height: 380px;
   }
 
+  .webcam-player {
+    min-height: 210px;
+  }
+
   .buoy-marker {
     min-width: 78px;
     padding: 7px 8px;
@@ -1181,5 +1352,13 @@ dd {
 
   .buoy-summary {
     grid-template-columns: 1fr;
+  }
+
+  .sources-fab {
+    width: 100%;
+  }
+
+  .sources-dialog-header {
+    display: grid;
   }
 }

@@ -129,39 +129,6 @@
         </article>
       </section>
 
-      <section class="grid map-grid" aria-label="Northern Outer Banks buoy water temperatures">
-        <article class="card map-card" id="buoy-map-card">
-          <div class="card-top">
-            <div>
-              <p class="eyebrow">VA line water temps</p>
-              <h2>Buoy temperature map</h2>
-            </div>
-            <a class="source-link" href="https://www.ndbc.noaa.gov/" target="_blank" rel="noreferrer">NOAA NDBC</a>
-          </div>
-          <p class="map-intro">
-            A northern Outer Banks view centered on the VA/NC line oceanfront, with nearby,
-            northern, and offshore buoys plotted by latest water temperature.
-          </p>
-          <div class="buoy-layout">
-            <div class="buoy-map" id="buoy-map" role="application" aria-label="Interactive map of buoy water temperatures near the northern Outer Banks"></div>
-            <aside class="buoy-panel">
-              <div class="buoy-summary">
-                <div>
-                  <span id="buoy-count">--</span>
-                  <small>fresh buoys</small>
-                </div>
-                <div>
-                  <span id="buoy-range">--</span>
-                  <small>water temp range</small>
-                </div>
-              </div>
-              <div class="buoy-list" id="buoy-list"></div>
-              <p class="note" id="buoy-note">Loading NOAA buoy network...</p>
-            </aside>
-          </div>
-        </article>
-      </section>
-
       <section class="grid secondary-grid" aria-label="Weather and environment">
         <article class="card tide-card" id="tide-card">
           <div class="card-top">
@@ -246,21 +213,113 @@
           </div>
           <p class="note" id="weather-note">--</p>
         </article>
+      </section>
 
-        <article class="card source-card">
-          <p class="eyebrow">MVP feed map</p>
-          <h2>What this dashboard pulls</h2>
-          <ul class="source-list">
-            <li><strong>Sound level:</strong> USGS instantaneous gage height for Currituck Sound on east bank at Corolla.</li>
-            <li><strong>Ocean data:</strong> NOAA NDBC Duck FRF realtime and spectral feeds, plus northern/offshore buoy water-temperature stations.</li>
-            <li><strong>Atlantic tides:</strong> NOAA CO-OPS high/low predictions from Sandbridge, the closest tide-prediction station found for the VA/NC line.</li>
-            <li><strong>Local weather:</strong> Currituck WeatherSTEM Carova fire station public portal, with NWS observations and hourly forecast fallback.</li>
-          </ul>
+      <section class="grid map-grid" aria-label="Northern Outer Banks buoy water temperatures">
+        <article class="card map-card" id="buoy-map-card">
+          <div class="card-top">
+            <div>
+              <p class="eyebrow">VA line water temps</p>
+              <h2>Buoy temperature map</h2>
+            </div>
+            <a class="source-link" href="https://www.ndbc.noaa.gov/" target="_blank" rel="noreferrer">NOAA NDBC</a>
+          </div>
+          <p class="map-intro">
+            A northern Outer Banks view centered on the VA/NC line oceanfront, with nearby,
+            northern, and offshore buoys plotted by latest water temperature.
+          </p>
+          <div class="buoy-layout">
+            <div class="buoy-map" id="buoy-map" role="application" aria-label="Interactive map of buoy water temperatures near the northern Outer Banks"></div>
+            <aside class="buoy-panel">
+              <div class="buoy-summary">
+                <div>
+                  <span id="buoy-count">--</span>
+                  <small>fresh buoys</small>
+                </div>
+                <div>
+                  <span id="buoy-range">--</span>
+                  <small>water temp range</small>
+                </div>
+              </div>
+              <div class="buoy-list" id="buoy-list"></div>
+              <p class="note" id="buoy-note">Loading NOAA buoy network...</p>
+            </aside>
+          </div>
         </article>
       </section>
+
+      <section class="grid webcam-grid" aria-label="Live beach camera">
+        <article class="card webcam-card" id="surf-cam-card">
+          <div class="card-top">
+            <div>
+              <p class="eyebrow">Corolla Light Resort</p>
+              <h2>Live surf cam</h2>
+            </div>
+            <a class="source-link" href="https://www.corollalightresort.com/surf-cam" target="_blank" rel="noreferrer">Vista Webcams</a>
+          </div>
+          <div class="webcam-player-wrap">
+            <div
+              class="webcam-player"
+              data-vistawebcams-stream="2O09J4QSEV"
+              data-autoplay="muted"
+              data-controls="true"
+            ></div>
+          </div>
+          <p class="note">Live Corolla Light oceanfront stream. Playback is provided by Vista Webcams.</p>
+        </article>
+      </section>
+
+      <button class="sources-fab" type="button" id="sources-open" aria-haspopup="dialog" aria-controls="sources-dialog">
+        Data sources
+      </button>
     </main>
 
+    <dialog class="sources-dialog" id="sources-dialog" aria-labelledby="sources-title">
+      <div class="sources-dialog-inner">
+        <div class="sources-dialog-header">
+          <div>
+            <p class="eyebrow">Dashboard feed map</p>
+            <h2 id="sources-title">What this dashboard pulls</h2>
+          </div>
+          <button class="sources-close" type="button" id="sources-close" aria-label="Close data sources">Close</button>
+        </div>
+
+        <div class="sources-modal-grid">
+          <section class="source-panel">
+            <h3>Core water feeds</h3>
+            <ul>
+              <li><strong>Currituck Sound level:</strong> USGS station 02043433, instantaneous gage height on the east bank at Corolla, shown with 1, 7, and 30 day chart windows.</li>
+              <li><strong>Duck FRF surf buoy:</strong> NOAA NDBC station 44056 realtime observations for wave height, water temperature, wind, air temperature, pressure, and dew point.</li>
+              <li><strong>Swell details:</strong> NOAA NDBC spectral feed for 44056, used for dominant swell and wind-wave breakdown when the spectral file is fresh.</li>
+              <li><strong>Atlantic tides:</strong> NOAA CO-OPS high/low predictions for Sandbridge, VA station 8639428, used because it is the closest tide-prediction station currently modeled for the VA/NC line oceanfront.</li>
+            </ul>
+          </section>
+
+          <section class="source-panel">
+            <h3>Map and weather feeds</h3>
+            <ul>
+              <li><strong>Buoy map:</strong> NOAA NDBC realtime station files for Cape Henry, Virginia Beach offshore, OOI Pioneer moorings, Duck FRF, Duck FRF 26m, and Nags Head.</li>
+              <li><strong>Station freshness:</strong> The map counts buoys with recent usable water-temperature observations and labels stale readings so they are not mistaken for current conditions.</li>
+              <li><strong>Fire station weather:</strong> Currituck WeatherSTEM Carova Beach public portal data, with NWS point observations and forecast data as fallbacks where needed.</li>
+              <li><strong>Forecast strips:</strong> Short hourly and daily summaries are normalized into compact cards so wind, precipitation chance, and temperature are comparable at a glance.</li>
+            </ul>
+          </section>
+
+          <section class="source-panel">
+            <h3>Live cam and caching</h3>
+            <ul>
+              <li><strong>Surf cam:</strong> Corolla Light Resort webcam embedded through Vista Webcams stream 2O09J4QSEV, with playback, rewind, snapshot, and viewer count controlled by the Vista player.</li>
+              <li><strong>Refresh cadence:</strong> Server snapshots are cached briefly to keep the dashboard fast and avoid repeatedly hammering public data providers.</li>
+              <li><strong>Local fallback:</strong> The browser keeps the latest valid snapshot in local storage, then clearly marks the dashboard as cached if a refresh fails.</li>
+              <li><strong>Known gaps:</strong> Tide predictions are guidance rather than observed water level, buoy observations can lag, and the live cam depends on third-party stream availability.</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </dialog>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script defer src="https://my.vistawebcams.com/js/vistawebcams-embed.js"></script>
     <script src="/app.js" type="module"></script>
   </body>
 </html>
