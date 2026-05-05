@@ -2,6 +2,12 @@ environment: prod
 
 replicaCount: 1
 
+deploymentStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+
 image:
   repository: ghcr.io/jwilson45/obx-conditions
   tag: ""

@@ -227,6 +227,10 @@ function addDays(date: Date, days: number) {
   return copy;
 }
 
+function parseNoaaUtcTime(value: unknown) {
+  return new Date(`${String(value).replace(" ", "T")}:00Z`).toISOString();
+}
+
 function omitHistory<T extends Record<string, unknown> | undefined>(value: T): T {
   if (!value) return value;
   const copy = { ...value };
@@ -364,7 +368,7 @@ async function getAtlanticTide() {
     range: "72",
     datum: ATLANTIC_TIDE_STATION.datum,
     station: ATLANTIC_TIDE_STATION.id,
-    time_zone: "lst_ldt",
+    time_zone: "gmt",
     units: "english",
     interval: "hilo",
     format: "json"
@@ -372,8 +376,8 @@ async function getAtlanticTide() {
   const apiUrl = `${SOURCES.coopsPredictions}?${params}`;
   const data: any = await fetchJson(apiUrl);
   const predictions = (data?.predictions ?? []).map((prediction: any) => ({
-    time: new Date(String(prediction.t).replace(" ", "T")).toISOString(),
-    localTime: prediction.t,
+    time: parseNoaaUtcTime(prediction.t),
+    localTime: `${prediction.t} UTC`,
     valueFt: asNumber(prediction.v),
     type: prediction.type === "H" ? "High" : prediction.type === "L" ? "Low" : prediction.type
   }));
