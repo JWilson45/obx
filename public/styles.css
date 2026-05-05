@@ -80,7 +80,6 @@ body::after {
   display: inline-flex;
   gap: 10px;
   align-items: center;
-  margin-bottom: 10px;
 }
 
 .brand-icon {
@@ -152,6 +151,7 @@ h3 {
   gap: 14px;
   align-items: center;
   min-height: 112px;
+  width: min(320px, 100%);
   padding: 18px;
   border-radius: 28px;
 }
@@ -1118,16 +1118,17 @@ dd {
   .hero {
     align-items: stretch;
   }
+
+  .hero-panel {
+    justify-self: stretch;
+    width: 100%;
+  }
 }
 
 @media (max-width: 620px) {
   .shell {
     width: min(100% - 20px, 1180px);
     padding: 24px 0;
-  }
-
-  h1 {
-    font-size: 3.25rem;
   }
 
   .card-top,
