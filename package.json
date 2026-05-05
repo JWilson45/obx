@@ -8,6 +8,10 @@
     "start": "bun run src/server.ts",
     "check": "DB_PATH=/private/tmp/obx-conditions-check.sqlite bun run src/server.ts --once",
     "test": "bun test",
-    "docker:push": "docker buildx build -f Dockerfile --platform=linux/amd64 -t ghcr.io/jwilson45/obx-conditions:0.1.0 -t ghcr.io/jwilson45/obx-conditions:latest --push ."
+    "version:patch": "jq --arg new_version $(jq -r .version package.json | awk -F. '{print $1\".\"$2\".\"$3+1}') '.version=$new_version' package.json > tmp.json && mv tmp.json package.json",
+    "version:minor": "jq --arg new_version $(jq -r .version package.json | awk -F. '{print $1\".\"$2+1\".0\"}') '.version=$new_version' package.json > tmp.json && mv tmp.json package.json",
+    "version:major": "jq --arg new_version $(jq -r .version package.json | awk -F. '{print $1+1\".0.0\"}') '.version=$new_version' package.json > tmp.json && mv tmp.json package.json",
+    "docker:build": "docker buildx build -f Dockerfile --platform=linux/amd64 -t ghcr.io/jwilson45/obx-conditions:$(jq -r .version package.json) -t ghcr.io/jwilson45/obx-conditions:latest --load .",
+    "docker:push": "docker buildx build -f Dockerfile --platform=linux/amd64 -t ghcr.io/jwilson45/obx-conditions:$(jq -r .version package.json) -t ghcr.io/jwilson45/obx-conditions:latest --push ."
   }
 }
