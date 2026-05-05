@@ -732,6 +732,7 @@ function renderTideChart(svg, tide) {
   const xForTime = (time) => padX + ((new Date(time).getTime() - startMs) / timeSpread) * usableW;
   const yForValue = (value) => padTop + (1 - (value - min) / spread) * usableH;
   const samples = [];
+  const cursorPoints = [];
 
   for (let index = 0; index < visible.length - 1; index++) {
     const current = visible[index];
@@ -745,6 +746,10 @@ function renderTideChart(svg, tide) {
       const time = currentMs + (nextMs - currentMs) * ratio;
       const value = current.valueFt + (next.valueFt - current.valueFt) * eased;
       samples.push([padX + ((time - startMs) / timeSpread) * usableW, yForValue(value)]);
+      cursorPoints.push({
+        time: new Date(time).toISOString(),
+        valueFt: value
+      });
     }
   }
 
@@ -754,6 +759,7 @@ function renderTideChart(svg, tide) {
   const nowX = now >= startMs && now <= endMs ? padX + ((now - startMs) / timeSpread) * usableW : undefined;
 
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.classList.add("has-chart-cursor");
   svg.innerHTML = `
     <path d="${area}" fill="rgba(15, 93, 109, 0.14)"></path>
     <path d="${line}" fill="none" stroke="#0f5d6d" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -773,7 +779,22 @@ function renderTideChart(svg, tide) {
       <line class="tide-chart-now" x1="${nowX.toFixed(2)}" x2="${nowX.toFixed(2)}" y1="${padTop}" y2="${baselineY}"></line>
       <text class="tide-chart-now-label" x="${nowX.toFixed(2)}" y="${padTop + 10}" text-anchor="middle">Now</text>
     ` : ""}
+    <g class="chart-cursor" opacity="0">
+      <line class="chart-cursor-line" x1="${padX}" x2="${padX}" y1="${padTop}" y2="${baselineY}" stroke="#0f5d6d"></line>
+      <circle class="chart-cursor-dot" cx="${padX}" cy="${padTop}" r="6" fill="#0f5d6d"></circle>
+      <rect class="chart-cursor-bg" x="${padX}" y="${padTop}" width="112" height="34" rx="8" fill="rgba(255, 250, 240, 0.92)"></rect>
+      <text class="chart-cursor-value" x="${padX}" y="${padTop}" text-anchor="middle" fill="#093944"></text>
+      <text class="chart-cursor-time" x="${padX}" y="${padTop}" text-anchor="middle" fill="#093944"></text>
+    </g>
+    <rect class="chart-hit-area" x="${padX}" y="${padTop}" width="${usableW}" height="${usableH}" fill="transparent"></rect>
   `;
+
+  bindChartCursor(svg, cursorPoints, samples, "valueFt", " ft", {
+    padLeft: padX,
+    padRight: padX,
+    padTop,
+    width
+  });
 }
 
 function renderForecast(weather) {
