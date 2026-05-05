@@ -581,19 +581,31 @@ function renderTide(tide) {
 }
 
 function renderTideChart(svg, tide) {
-  const predictions = (tide?.predictions || [])
+  const predictions = [
+    ...(tide?.predictions || []),
+    ...(tide?.previous ? [tide.previous] : []),
+    ...(tide?.upcoming || [])
+  ]
     .filter((point) => Number.isFinite(point.valueFt) && Number.isFinite(new Date(point.time).getTime()))
     .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+  const uniquePredictions = [];
+  const seenPredictionKeys = new Set();
+  for (const point of predictions) {
+    const key = `${point.time}-${point.type}`;
+    if (seenPredictionKeys.has(key)) continue;
+    seenPredictionKeys.add(key);
+    uniquePredictions.push(point);
+  }
 
-  if (!svg || predictions.length < 2) {
+  if (!svg || uniquePredictions.length < 2) {
     if (svg) svg.innerHTML = "";
     return;
   }
 
   const now = Date.now();
-  const nextIndex = predictions.findIndex((point) => new Date(point.time).getTime() > now);
-  const startIndex = nextIndex === -1 ? Math.max(0, predictions.length - 5) : Math.max(0, nextIndex - 1);
-  const visible = predictions.slice(startIndex, startIndex + 5);
+  const nextIndex = uniquePredictions.findIndex((point) => new Date(point.time).getTime() > now);
+  const startIndex = nextIndex === -1 ? Math.max(0, uniquePredictions.length - 5) : Math.max(0, nextIndex - 1);
+  const visible = uniquePredictions.slice(startIndex, startIndex + 5);
   if (visible.length < 2) {
     svg.innerHTML = "";
     return;

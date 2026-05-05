@@ -197,6 +197,12 @@ function yyyymmdd(date: Date) {
   return `${year}${month}${day}`;
 }
 
+function addDays(date: Date, days: number) {
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
 function omitHistory<T extends Record<string, unknown> | undefined>(value: T): T {
   if (!value) return value;
   const copy = { ...value };
@@ -326,11 +332,12 @@ async function getMarine() {
 }
 
 async function getAtlanticTide() {
+  const today = new Date();
   const params = new URLSearchParams({
     product: "predictions",
     application: "obx_conditions",
-    begin_date: yyyymmdd(new Date()),
-    range: "48",
+    begin_date: yyyymmdd(addDays(today, -1)),
+    range: "72",
     datum: ATLANTIC_TIDE_STATION.datum,
     station: ATLANTIC_TIDE_STATION.id,
     time_zone: "lst_ldt",

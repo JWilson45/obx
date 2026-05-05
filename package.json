@@ -12,6 +12,8 @@
     "version:minor": "jq --arg new_version $(jq -r .version package.json | awk -F. '{print $1\".\"$2+1\".0\"}') '.version=$new_version' package.json > tmp.json && mv tmp.json package.json",
     "version:major": "jq --arg new_version $(jq -r .version package.json | awk -F. '{print $1+1\".0.0\"}') '.version=$new_version' package.json > tmp.json && mv tmp.json package.json",
     "docker:build": "docker buildx build -f Dockerfile --platform=linux/amd64 -t ghcr.io/jwilson45/obx-conditions:$(jq -r .version package.json) -t ghcr.io/jwilson45/obx-conditions:latest --load .",
-    "docker:push": "docker buildx build -f Dockerfile --platform=linux/amd64 -t ghcr.io/jwilson45/obx-conditions:$(jq -r .version package.json) -t ghcr.io/jwilson45/obx-conditions:latest --push ."
+    "docker:push": "docker buildx build -f Dockerfile --platform=linux/amd64,linux/arm64 -t ghcr.io/jwilson45/obx-conditions:$(jq -r .version package.json) -t ghcr.io/jwilson45/obx-conditions:latest --push .",
+    "deploy": "helm upgrade --install obx-prod helm/obx --namespace obx --create-namespace -f helm/values/obx/values-prod.yaml --set-string image.tag=$(jq -r .version package.json)",
+    "release": "bun run docker:push && bun run deploy"
   }
 }
