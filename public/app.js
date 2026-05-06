@@ -11,6 +11,8 @@ const els = {
   soundTime: document.querySelector("#sound-time"),
   soundChart: document.querySelector("#sound-chart"),
   soundChartControls: document.querySelector("#sound-chart-controls"),
+  windPredictionMode: document.querySelector("#wind-prediction-mode"),
+  windPredictionList: document.querySelector("#wind-prediction-list"),
   waveHeight: document.querySelector("#wave-height"),
   waterTemp: document.querySelector("#water-temp"),
   wavePeriod: document.querySelector("#wave-period"),
@@ -242,6 +244,58 @@ function dayLabel(time, fallback = "--") {
   }).format(date);
 }
 
+function windDirectionDegrees(direction) {
+  const normalized = String(direction || "").trim().toUpperCase();
+  const directions = {
+    N: 0,
+    NNE: 22.5,
+    NE: 45,
+    ENE: 67.5,
+    E: 90,
+    ESE: 112.5,
+    SE: 135,
+    SSE: 157.5,
+    S: 180,
+    SSW: 202.5,
+    SW: 225,
+    WSW: 247.5,
+    W: 270,
+    WNW: 292.5,
+    NW: 315,
+    NNW: 337.5
+  };
+  return directions[normalized];
+}
+
+function milesBetween(a, b) {
+  const earthRadiusMiles = 3958.8;
+  const lat1 = Number(a?.lat);
+  const lon1 = Number(a?.lon);
+  const lat2 = Number(b?.lat);
+  const lon2 = Number(b?.lon);
+  if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return undefined;
+  const toRad = (value) => value * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const rLat1 = toRad(lat1);
+  const rLat2 = toRad(lat2);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rLat1) * Math.cos(rLat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * earthRadiusMiles * Math.asin(Math.sqrt(h));
+}
+
+function bearingDegrees(from, to) {
+  const lat1 = Number(from?.lat);
+  const lon1 = Number(from?.lon);
+  const lat2 = Number(to?.lat);
+  const lon2 = Number(to?.lon);
+  if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return undefined;
+  const toRad = (value) => value * Math.PI / 180;
+  const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+  const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+    Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
 function cursorTimeLabel(time) {
   const date = new Date(time);
   if (!Number.isFinite(date.getTime())) return "--";
@@ -323,6 +377,37 @@ function renderTopCharts() {
 
   syncChartControls(els.soundChartControls, chartState.soundDays);
   syncChartControls(els.waveChartControls, chartState.waveDays);
+  renderWindPrediction(chartState.data?.weather);
+}
+
+function renderWindPrediction(weather) {
+  if (!els.windPredictionList) return;
+
+  const isHourly = chartState.soundDays === 1;
+  const periods = Array.isArray(isHourly ? weather?.forecast : weather?.dailyForecast)
+    ? (isHourly ? weather.forecast : weather.dailyForecast).slice(0, isHourly ? 8 : 7)
+    : [];
+
+  setText(els.windPredictionMode, isHourly ? "Hourly" : "Daily");
+
+  if (!periods.length) {
+    els.windPredictionList.innerHTML = `<p class="wind-prediction-empty">No ${isHourly ? "hourly" : "daily"} wind forecast is available right now.</p>`;
+    return;
+  }
+
+  els.windPredictionList.innerHTML = periods.map((period) => {
+    const degrees = windDirectionDegrees(period.windDirection);
+    const label = isHourly ? hourLabel(period.time) : period.name || dayLabel(period.time);
+    const speed = period.windSpeed || "--";
+    return `
+      <div class="wind-prediction-item">
+        <span class="wind-prediction-time">${escapeHtml(label)}</span>
+        <span class="wind-prediction-arrow${Number.isFinite(degrees) ? "" : " neutral"}" style="${Number.isFinite(degrees) ? `--wind-rotation:${degrees}deg` : ""}" aria-hidden="true">↑</span>
+        <span class="wind-prediction-direction">${escapeHtml(period.windDirection || "--")}</span>
+        <strong>${escapeHtml(speed)}</strong>
+      </div>
+    `;
+  }).join("");
 }
 
 function renderSparkline(svg, points, key, color = "#0f5d6d", fill = "rgba(15, 93, 109, 0.14)", unit = "", options = {}) {
@@ -483,6 +568,15 @@ function ensureBuoyMap(reference) {
   return mapState.map;
 }
 
+function pointOffsetMiles(point, eastMiles = 0, northMiles = 0) {
+  const lat = Number(point?.lat);
+  const lon = Number(point?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return undefined;
+  const milesPerDegreeLat = 69;
+  const milesPerDegreeLon = Math.max(1, 69 * Math.cos(lat * Math.PI / 180));
+  return [lat + northMiles / milesPerDegreeLat, lon + eastMiles / milesPerDegreeLon];
+}
+
 function markerHtml(station) {
   const temp = station.latest?.waterTempF;
   const label = Number.isFinite(temp) ? `${oneDecimal(temp)}°` : "--";
@@ -505,7 +599,6 @@ function popupHtml(station) {
     <span>${ageLabel(station.latestAgeHours)} · ${Number.isFinite(distance) ? `${oneDecimal(distance)} mi from VA/NC line` : "distance unknown"}</span>
   `;
 }
-
 function renderLeafletBuoys(buoys, stations) {
   const map = ensureBuoyMap(buoys.reference);
   if (!map || !mapState.layer || !mapState.referenceLayer) return;
@@ -524,14 +617,29 @@ function renderLeafletBuoys(buoys, stations) {
       iconAnchor: [60, 16]
     });
     window.L.marker([reference.lat, reference.lon], { icon: referenceIcon, interactive: false }).addTo(mapState.referenceLayer);
-    window.L.circle([reference.lat, reference.lon], {
-      radius: 1609,
-      color: "#d9672b",
-      weight: 2,
-      opacity: 0.75,
-      fillColor: "#d9672b",
-      fillOpacity: 0.08
-    }).addTo(mapState.referenceLayer);
+    [
+      { label: "1 mi", radius: 1609.344, color: "#d9672b", eastMiles: 1 },
+      { label: "10 mi", radius: 16093.44, color: "#b73f25", eastMiles: 10 }
+    ].forEach((ring) => {
+      window.L.circle([reference.lat, reference.lon], {
+        radius: ring.radius,
+        color: ring.color,
+        weight: ring.label === "1 mi" ? 2 : 2.5,
+        opacity: ring.label === "1 mi" ? 0.8 : 0.72,
+        fillColor: ring.color,
+        fillOpacity: ring.label === "1 mi" ? 0.08 : 0.035
+      }).addTo(mapState.referenceLayer);
+
+      const labelPoint = pointOffsetMiles(reference, ring.eastMiles, ring.label === "1 mi" ? 0.18 : 0.45);
+      if (!labelPoint) return;
+      const ringIcon = window.L.divIcon({
+        className: "leaflet-div-icon",
+        html: `<div class="ring-label">${escapeHtml(ring.label)}</div>`,
+        iconSize: [54, 26],
+        iconAnchor: [27, 13]
+      });
+      window.L.marker(labelPoint, { icon: ringIcon, interactive: false }).addTo(mapState.referenceLayer);
+    });
   }
 
   const bounds = [];
@@ -556,7 +664,7 @@ function renderLeafletBuoys(buoys, stations) {
 
   if (reference?.lat && reference?.lon) bounds.push([reference.lat, reference.lon]);
   if (bounds.length) {
-    map.fitBounds(bounds, { padding: [30, 30], maxZoom: 8 });
+    map.fitBounds(bounds, { padding: [34, 34], maxZoom: 8 });
   }
 
   setTimeout(() => map.invalidateSize(), 0);

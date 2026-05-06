@@ -1152,6 +1152,20 @@ dd {
   white-space: nowrap;
 }
 
+.ring-label {
+  padding: 6px 9px;
+  border: 1px solid rgba(124, 55, 29, 0.24);
+  border-radius: 999px;
+  color: #7c371d;
+  background: rgba(255, 250, 240, 0.92);
+  box-shadow: 0 10px 24px rgba(9, 57, 68, 0.12);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .map-fallback {
   display: grid;
   place-items: center;
