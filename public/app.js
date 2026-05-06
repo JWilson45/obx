@@ -397,12 +397,14 @@ function renderWindPrediction(weather) {
 
   els.windPredictionList.innerHTML = periods.map((period) => {
     const degrees = windDirectionDegrees(period.windDirection);
+    const arrowDegrees = Number.isFinite(degrees) ? (degrees + 180) % 360 : undefined;
     const label = isHourly ? hourLabel(period.time) : period.name || dayLabel(period.time);
     const speed = period.windSpeed || "--";
+    const windLabel = period.windDirection ? `Wind from ${period.windDirection}` : "Wind direction unavailable";
     return `
       <div class="wind-prediction-item">
         <span class="wind-prediction-time">${escapeHtml(label)}</span>
-        <span class="wind-prediction-arrow${Number.isFinite(degrees) ? "" : " neutral"}" style="${Number.isFinite(degrees) ? `--wind-rotation:${degrees}deg` : ""}" aria-hidden="true">↑</span>
+        <span class="wind-prediction-arrow${Number.isFinite(arrowDegrees) ? "" : " neutral"}" style="${Number.isFinite(arrowDegrees) ? `--wind-rotation:${arrowDegrees}deg` : ""}" aria-label="${escapeHtml(windLabel)}" title="${escapeHtml(windLabel)}"></span>
         <span class="wind-prediction-direction">${escapeHtml(period.windDirection || "--")}</span>
         <strong>${escapeHtml(speed)}</strong>
       </div>
