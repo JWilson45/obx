@@ -12,11 +12,16 @@
   <body>
     <main class="shell">
       <section class="hero">
-        <div>
+        <div class="hero-identity">
           <div class="brand-kicker">
             <img class="brand-icon" src="/images/obx-icon.png" width="42" height="42" alt="" />
             <p class="eyebrow">Outer Banks, NC</p>
           </div>
+          <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false" aria-label="Enable dark mode">
+            <span class="theme-toggle-icon" aria-hidden="true">🌓</span>
+            <span class="theme-toggle-text">Theme</span>
+          </button>
+          <p class="theme-toggle-status" id="theme-status" aria-live="polite"></p>
         </div>
         <div class="hero-panel">
           <span class="status-dot" id="system-status-dot"></span>

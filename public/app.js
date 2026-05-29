@@ -49,6 +49,8 @@ const els = {
   buoyCount: document.querySelector("#buoy-count"),
   buoyRange: document.querySelector("#buoy-range"),
   buoyNote: document.querySelector("#buoy-note"),
+  themeToggle: document.querySelector("#theme-toggle"),
+  themeStatus: document.querySelector("#theme-status"),
   sourcesOpen: document.querySelector("#sources-open"),
   sourcesClose: document.querySelector("#sources-close"),
   sourcesDialog: document.querySelector("#sources-dialog")
@@ -58,6 +60,7 @@ const mapState = {
   map: null,
   layer: null,
   referenceLayer: null,
+  baseLayer: null,
   markers: new Map(),
   stations: new Map(),
   selectedStationId: null
@@ -72,9 +75,32 @@ const chartState = {
   refreshError: null
 };
 
+const THEME_STORAGE_KEY = "obx-conditions:theme:v1";
+const THEME_QUERY = "(prefers-color-scheme: dark)";
+
+const MAP_TILE_THEMES = {
+  light: {
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    options: {
+      maxZoom: 18,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }
+  },
+  dark: {
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    options: {
+      maxZoom: 18,
+      subdomains: ["a", "b", "c", "d"],
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+    }
+  }
+};
+
 const SNAPSHOT_STORAGE_KEY = "obx-conditions:snapshot:v1";
 const STALE_SNAPSHOT_MS = 30 * 60 * 1000;
 const VISTA_WEBCAM_STREAM = "2O09J4QSEV";
+const themeMediaQuery = window.matchMedia(THEME_QUERY);
+let themePreference = "system";
 
 const fmt = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -93,6 +119,157 @@ const signed = (value, unit) => {
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toFixed(2)} ${unit}`;
 };
+
+function readThemePreference() {
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === "light" || stored === "dark" ? stored : "system";
+  } catch {
+    return "system";
+  }
+}
+
+function persistThemePreference(nextPreference) {
+  try {
+    if (nextPreference === "system") {
+      localStorage.removeItem(THEME_STORAGE_KEY);
+    } else {
+      localStorage.setItem(THEME_STORAGE_KEY, nextPreference);
+    }
+  } catch {
+    // Ignore localStorage write failures.
+  }
+}
+
+function getSystemTheme() {
+  return themeMediaQuery.matches ? "dark" : "light";
+}
+
+function getResolvedTheme(preference = themePreference) {
+  return preference === "system" ? getSystemTheme() : preference;
+}
+
+function getThemePalette(theme = getResolvedTheme()) {
+  const isDark = theme === "dark";
+  if (!isDark) {
+    return {
+      sound: {
+        line: "#0f5d6d",
+        fill: "rgba(15, 93, 109, 0.14)",
+        grid: "rgba(19, 36, 34, 0.16)",
+        label: "rgba(19, 36, 34, 0.56)",
+        cursorBg: "rgba(255, 250, 240, 0.92)",
+        cursorText: "#093944",
+        markerText: "#093944"
+      },
+      wave: {
+        line: "#bfe8df",
+        fill: "rgba(191, 232, 223, 0.18)",
+        grid: "rgba(238, 251, 247, 0.24)",
+        label: "rgba(238, 251, 247, 0.72)",
+        cursorBg: "rgba(9, 57, 68, 0.82)",
+        cursorText: "#eefbf7",
+        markerText: "#eefbf7"
+      },
+      tide: {
+        fill: "rgba(15, 93, 109, 0.14)",
+        line: "#0f5d6d",
+        cursorLine: "#0f5d6d",
+        cursorBg: "rgba(255, 250, 240, 0.92)",
+        cursorText: "#093944",
+        nowLabel: "#89401e",
+        nowLine: "#d9672b"
+      }
+    };
+  }
+
+  return {
+    sound: {
+      line: "#8ac7d6",
+      fill: "rgba(138, 199, 214, 0.2)",
+      grid: "rgba(238, 251, 247, 0.22)",
+      label: "rgba(238, 251, 247, 0.8)",
+      cursorBg: "rgba(9, 57, 68, 0.86)",
+      cursorText: "#f4f8f9",
+      markerText: "#f4f8f9"
+    },
+    wave: {
+      line: "#b8e8f5",
+      fill: "rgba(173, 224, 236, 0.2)",
+      grid: "rgba(238, 251, 247, 0.24)",
+      label: "rgba(238, 251, 247, 0.8)",
+      cursorBg: "rgba(9, 57, 68, 0.86)",
+      cursorText: "#f4f8f9",
+      markerText: "#f4f8f9"
+    },
+    tide: {
+      fill: "rgba(16, 64, 82, 0.35)",
+      line: "#8ac7d6",
+      cursorLine: "#8ac7d6",
+      cursorBg: "rgba(9, 57, 68, 0.86)",
+      cursorText: "#f4f8f9",
+      nowLabel: "#f4b18a",
+      nowLine: "#f5af86"
+    }
+  };
+}
+
+function getBuoyTileConfig(theme = getResolvedTheme()) {
+  return MAP_TILE_THEMES[theme] ?? MAP_TILE_THEMES.light;
+}
+
+function createBuoyTileLayer(theme = getResolvedTheme()) {
+  if (!window.L) return null;
+  const config = getBuoyTileConfig(theme);
+  return window.L.tileLayer(config.url, config.options);
+}
+
+function applyBuoyTileTheme(theme = getResolvedTheme()) {
+  if (!mapState.map || !window.L || !mapState.baseLayer) return;
+  if (mapState.baseLayer instanceof Object && mapState.baseLayer._obxTheme === theme) return;
+  const nextLayer = createBuoyTileLayer(theme);
+  if (!nextLayer) return;
+  mapState.baseLayer.remove();
+  nextLayer._obxTheme = theme;
+  mapState.baseLayer = nextLayer.addTo(mapState.map);
+}
+
+function setThemePreference(nextPreference, { persist = false, rerender = true } = {}) {
+  themePreference = nextPreference;
+  if (persist) persistThemePreference(nextPreference);
+  const resolvedTheme = getResolvedTheme();
+
+  document.body.dataset.theme = resolvedTheme;
+  const isDark = resolvedTheme === "dark";
+  const statusLabel = themePreference === "system"
+    ? `Following system (${resolvedTheme})`
+    : `Manual (${resolvedTheme})`;
+
+  if (els.themeToggle) {
+    els.themeToggle.setAttribute("aria-pressed", String(isDark));
+    els.themeToggle.setAttribute("aria-label", isDark ? "Enable light mode" : "Enable dark mode");
+  }
+
+  if (els.themeStatus) setText(els.themeStatus, statusLabel);
+
+  applyBuoyTileTheme(resolvedTheme);
+
+  if (rerender && chartState.data) {
+    renderTopCharts();
+    renderTide(chartState.data.tide);
+  }
+}
+
+function toggleTheme() {
+  const nextPreference = getResolvedTheme() === "dark" ? "light" : "dark";
+  setThemePreference(nextPreference, { persist: true });
+}
+
+function onSystemThemeChange() {
+  if (themePreference === "system") {
+    setThemePreference("system");
+  }
+}
 
 function setText(node, value) {
   if (node) node.textContent = value;
@@ -352,6 +529,7 @@ function syncForecastControls() {
 function renderTopCharts() {
   const sound = chartState.data?.sound;
   const marine = chartState.data?.marine;
+  const palette = getThemePalette();
 
   if (sound?.latest) {
     const soundPoints = chartSeries(sound, chartState.soundDays);
@@ -362,16 +540,18 @@ function renderTopCharts() {
     setText(els.soundRangeLabel, `${rangeLabel(chartState.soundDays)} range`);
     setText(els.soundRange, `${oneDecimal(soundRange?.min)}-${oneDecimal(soundRange?.max)} ft`);
     els.soundChart?.setAttribute("aria-label", `${rangeLabel(chartState.soundDays)} water level chart`);
-    renderSparkline(els.soundChart, soundPoints, "value", "#0f5d6d", "rgba(15, 93, 109, 0.14)", "ft", {
-      days: chartState.soundDays
+    renderSparkline(els.soundChart, soundPoints, "value", "ft", {
+      days: chartState.soundDays,
+      ...palette.sound
     });
   }
 
   if (marine?.latest) {
     const wavePoints = chartSeries(marine, chartState.waveDays);
     els.waveChart?.setAttribute("aria-label", `${rangeLabel(chartState.waveDays)} wave height chart`);
-    renderSparkline(els.waveChart, wavePoints, "waveHeightFt", "#bfe8df", "rgba(191, 232, 223, 0.18)", "ft", {
-      days: chartState.waveDays
+    renderSparkline(els.waveChart, wavePoints, "waveHeightFt", "ft", {
+      days: chartState.waveDays,
+      ...palette.wave
     });
   }
 
@@ -412,7 +592,7 @@ function renderWindPrediction(weather) {
   }).join("");
 }
 
-function renderSparkline(svg, points, key, color = "#0f5d6d", fill = "rgba(15, 93, 109, 0.14)", unit = "", options = {}) {
+function renderSparkline(svg, points, key, unit = "", options = {}) {
   if (!svg || !Array.isArray(points) || points.length < 2) {
     if (svg) svg.innerHTML = "";
     return;
@@ -457,10 +637,15 @@ function renderSparkline(svg, points, key, color = "#0f5d6d", fill = "rgba(15, 9
       label: isOneDay ? hourLabel(points[pointIndex]?.time) : shortTickLabel(points[pointIndex]?.time)
     };
   });
-  const gridColor = color === "#bfe8df" ? "rgba(238, 251, 247, 0.24)" : "rgba(19, 36, 34, 0.16)";
-  const labelColor = color === "#bfe8df" ? "rgba(238, 251, 247, 0.72)" : "rgba(19, 36, 34, 0.56)";
-  const cursorLabelColor = color === "#bfe8df" ? "#eefbf7" : "#093944";
-  const cursorBgColor = color === "#bfe8df" ? "rgba(9, 57, 68, 0.82)" : "rgba(255, 250, 240, 0.92)";
+  const palette = {
+    lineColor: "#0f5d6d",
+    fillColor: "rgba(15, 93, 109, 0.14)",
+    gridColor: "rgba(19, 36, 34, 0.16)",
+    labelColor: "rgba(19, 36, 34, 0.56)",
+    cursorLabelColor: "#093944",
+    cursorBgColor: "rgba(255, 250, 240, 0.92)",
+    ...options
+  };
 
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.classList.add("has-chart-cursor");
@@ -468,23 +653,23 @@ function renderSparkline(svg, points, key, color = "#0f5d6d", fill = "rgba(15, 9
     ${yTicks.map((value) => {
       const y = padTop + (1 - (value - min) / spread) * usableH;
       return `
-        <line class="chart-grid-line" x1="${padLeft}" x2="${width - padRight}" y1="${y.toFixed(2)}" y2="${y.toFixed(2)}" stroke="${gridColor}"></line>
-        <text class="chart-label" x="${padLeft - 10}" y="${(y + 4).toFixed(2)}" text-anchor="end" fill="${labelColor}">${oneDecimal(value)}${unit}</text>
+        <line class="chart-grid-line" x1="${padLeft}" x2="${width - padRight}" y1="${y.toFixed(2)}" y2="${y.toFixed(2)}" stroke="${palette.gridColor}"></line>
+        <text class="chart-label" x="${padLeft - 10}" y="${(y + 4).toFixed(2)}" text-anchor="end" fill="${palette.labelColor}">${oneDecimal(value)}${unit}</text>
       `;
     }).join("")}
     ${xTicks.map((tick, index) => `
-      <line class="chart-grid-line vertical" x1="${tick.x.toFixed(2)}" x2="${tick.x.toFixed(2)}" y1="${padTop}" y2="${baselineY}" stroke="${gridColor}"></line>
-      <text class="chart-label chart-x-label" x="${tick.x.toFixed(2)}" y="${height - 9}" text-anchor="${index === 0 ? "start" : index === xTicks.length - 1 ? "end" : "middle"}" fill="${labelColor}">${escapeHtml(tick.label)}</text>
+      <line class="chart-grid-line vertical" x1="${tick.x.toFixed(2)}" x2="${tick.x.toFixed(2)}" y1="${padTop}" y2="${baselineY}" stroke="${palette.gridColor}"></line>
+      <text class="chart-label chart-x-label" x="${tick.x.toFixed(2)}" y="${height - 9}" text-anchor="${index === 0 ? "start" : index === xTicks.length - 1 ? "end" : "middle"}" fill="${palette.labelColor}">${escapeHtml(tick.label)}</text>
     `).join("")}
-    <path d="${area}" fill="${fill}"></path>
-    <path d="${line}" fill="none" stroke="${color}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></path>
-    <circle cx="${coords.at(-1)[0].toFixed(2)}" cy="${coords.at(-1)[1].toFixed(2)}" r="7" fill="${color}"></circle>
+    <path d="${area}" fill="${palette.fillColor}"></path>
+    <path d="${line}" fill="none" stroke="${palette.lineColor}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></path>
+    <circle cx="${coords.at(-1)[0].toFixed(2)}" cy="${coords.at(-1)[1].toFixed(2)}" r="7" fill="${palette.lineColor}"></circle>
     <g class="chart-cursor" opacity="0">
-      <line class="chart-cursor-line" x1="${padLeft}" x2="${padLeft}" y1="${padTop}" y2="${baselineY}" stroke="${color}"></line>
-      <circle class="chart-cursor-dot" cx="${padLeft}" cy="${padTop}" r="6" fill="${color}"></circle>
-      <rect class="chart-cursor-bg" x="${padLeft}" y="${padTop}" width="112" height="34" rx="8" fill="${cursorBgColor}"></rect>
-      <text class="chart-cursor-value" x="${padLeft}" y="${padTop}" text-anchor="middle" fill="${cursorLabelColor}"></text>
-      <text class="chart-cursor-time" x="${padLeft}" y="${padTop}" text-anchor="middle" fill="${cursorLabelColor}"></text>
+      <line class="chart-cursor-line" x1="${padLeft}" x2="${padLeft}" y1="${padTop}" y2="${baselineY}" stroke="${palette.lineColor}"></line>
+      <circle class="chart-cursor-dot" cx="${padLeft}" cy="${padTop}" r="6" fill="${palette.lineColor}"></circle>
+      <rect class="chart-cursor-bg" x="${padLeft}" y="${padTop}" width="112" height="34" rx="8" fill="${palette.cursorBgColor}"></rect>
+      <text class="chart-cursor-value" x="${padLeft}" y="${padTop}" text-anchor="middle" fill="${palette.cursorLabelColor}"></text>
+      <text class="chart-cursor-time" x="${padLeft}" y="${padTop}" text-anchor="middle" fill="${palette.cursorLabelColor}"></text>
     </g>
     <rect class="chart-hit-area" x="${padLeft}" y="${padTop}" width="${usableW}" height="${usableH}" fill="transparent"></rect>
   `;
@@ -554,16 +739,18 @@ function ensureBuoyMap(reference) {
   }
 
   if (mapState.map) return mapState.map;
+  const selectedTheme = getResolvedTheme();
 
   mapState.map = window.L.map(els.buoyMap, {
     scrollWheelZoom: false,
     zoomControl: true
   }).setView([reference?.lat ?? 36.55, reference?.lon ?? -75.87], 8);
 
-  window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 18,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-  }).addTo(mapState.map);
+  const tileLayer = createBuoyTileLayer(selectedTheme);
+  if (tileLayer) {
+    tileLayer._obxTheme = selectedTheme;
+    mapState.baseLayer = tileLayer.addTo(mapState.map);
+  }
 
   mapState.layer = window.L.layerGroup().addTo(mapState.map);
   mapState.referenceLayer = window.L.layerGroup().addTo(mapState.map);
@@ -795,6 +982,7 @@ function renderTide(tide) {
 }
 
 function renderTideChart(svg, tide) {
+  const palette = getThemePalette();
   const predictions = [
     ...(tide?.predictions || []),
     ...(tide?.previous ? [tide.previous] : []),
@@ -871,8 +1059,8 @@ function renderTideChart(svg, tide) {
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.classList.add("has-chart-cursor");
   svg.innerHTML = `
-    <path d="${area}" fill="rgba(15, 93, 109, 0.14)"></path>
-    <path d="${line}" fill="none" stroke="#0f5d6d" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></path>
+    <path d="${area}" fill="${palette.tide.fill}"></path>
+    <path d="${line}" fill="none" stroke="${palette.tide.line}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></path>
     ${visible.map((point) => {
       const x = xForTime(point.time);
       const y = yForValue(point.valueFt);
@@ -886,15 +1074,15 @@ function renderTideChart(svg, tide) {
       `;
     }).join("")}
     ${Number.isFinite(nowX) ? `
-      <line class="tide-chart-now" x1="${nowX.toFixed(2)}" x2="${nowX.toFixed(2)}" y1="${padTop}" y2="${baselineY}"></line>
-      <text class="tide-chart-now-label" x="${nowX.toFixed(2)}" y="${padTop + 10}" text-anchor="middle">Now</text>
+      <line class="tide-chart-now" x1="${nowX.toFixed(2)}" x2="${nowX.toFixed(2)}" y1="${padTop}" y2="${baselineY}" style="stroke:${palette.tide.nowLine}"></line>
+      <text class="tide-chart-now-label" x="${nowX.toFixed(2)}" y="${padTop + 10}" text-anchor="middle" style="fill:${palette.tide.nowLabel}">Now</text>
     ` : ""}
     <g class="chart-cursor" opacity="0">
-      <line class="chart-cursor-line" x1="${padX}" x2="${padX}" y1="${padTop}" y2="${baselineY}" stroke="#0f5d6d"></line>
-      <circle class="chart-cursor-dot" cx="${padX}" cy="${padTop}" r="6" fill="#0f5d6d"></circle>
-      <rect class="chart-cursor-bg" x="${padX}" y="${padTop}" width="112" height="34" rx="8" fill="rgba(255, 250, 240, 0.92)"></rect>
-      <text class="chart-cursor-value" x="${padX}" y="${padTop}" text-anchor="middle" fill="#093944"></text>
-      <text class="chart-cursor-time" x="${padX}" y="${padTop}" text-anchor="middle" fill="#093944"></text>
+      <line class="chart-cursor-line" x1="${padX}" x2="${padX}" y1="${padTop}" y2="${baselineY}" stroke="${palette.tide.cursorLine}"></line>
+      <circle class="chart-cursor-dot" cx="${padX}" cy="${padTop}" r="6" fill="${palette.tide.cursorLine}"></circle>
+      <rect class="chart-cursor-bg" x="${padX}" y="${padTop}" width="112" height="34" rx="8" fill="${palette.tide.cursorBg}"></rect>
+      <text class="chart-cursor-value" x="${padX}" y="${padTop}" text-anchor="middle" fill="${palette.tide.cursorText}"></text>
+      <text class="chart-cursor-time" x="${padX}" y="${padTop}" text-anchor="middle" fill="${palette.tide.cursorText}"></text>
     </g>
     <rect class="chart-hit-area" x="${padX}" y="${padTop}" width="${usableW}" height="${usableH}" fill="transparent"></rect>
   `;
@@ -1007,6 +1195,19 @@ els.sourcesDialog?.addEventListener("click", (event) => {
   if (event.target === els.sourcesDialog) closeSourcesDialog();
 });
 
+function initializeTheme() {
+  themePreference = readThemePreference();
+
+  if (themeMediaQuery?.addEventListener) {
+    themeMediaQuery.addEventListener("change", onSystemThemeChange);
+  } else if (themeMediaQuery?.addListener) {
+    themeMediaQuery.addListener(onSystemThemeChange);
+  }
+
+  els.themeToggle?.addEventListener("click", toggleTheme);
+  setThemePreference(themePreference);
+}
+
 async function load() {
   const storedSnapshot = readStoredSnapshot();
   if (storedSnapshot && !chartState.data) {
@@ -1040,6 +1241,7 @@ async function load() {
   }
 }
 
+initializeTheme();
 load();
 initVistaWebcam();
 setInterval(updateCacheStatus, 1000);

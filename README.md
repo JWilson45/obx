@@ -248,6 +248,11 @@ The frontend is deliberately framework-free:
 - Sparkline charts are rendered as inline SVG paths.
 - The buoy map uses Leaflet with OpenStreetMap tiles, station-coordinate markers, popups, and a one-mile VA/NC-line reference circle.
 - The visual design uses glassy cards over a generated OBX background with readability overlays.
+- Theme behavior:
+  - On load, the dashboard follows your OS/browser color scheme preference (`prefers-color-scheme`).
+  - Use the **Theme** button in the hero area to force dark or light mode.
+  - The chosen mode is persisted in localStorage and reused on reload.
+  - Map tiles, charts, and panel/control colors adapt with the selected theme.
 
 If the UI grows, likely next steps are:
 
