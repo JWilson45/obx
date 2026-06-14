@@ -270,14 +270,16 @@
             <a class="source-link" href="https://www.corollalightresort.com/surf-cam" target="_blank" rel="noreferrer">Vista Webcams</a>
           </div>
           <div class="webcam-player-wrap">
-            <div
+            <iframe
               class="webcam-player"
-              data-vistawebcams-stream="2O09J4QSEV"
-              data-autoplay="muted"
-              data-controls="true"
-            ></div>
+              src="https://my.vistawebcams.com/embed/2O09J4QSEV"
+              title="Live Corolla Light Resort surf cam"
+              loading="lazy"
+              allow="autoplay; fullscreen; picture-in-picture"
+              allowfullscreen
+            ></iframe>
           </div>
-          <p class="note">Live Corolla Light oceanfront stream. Playback is provided by Vista Webcams.</p>
+          <p class="note">Live Corolla Light oceanfront stream. Playback is provided by Vista Webcams on its hosted embed.</p>
         </article>
       </section>
 
@@ -320,7 +322,7 @@
           <section class="source-panel">
             <h3>Live cam and caching</h3>
             <ul>
-              <li><strong>Surf cam:</strong> Corolla Light Resort webcam embedded through Vista Webcams stream 2O09J4QSEV, with playback, rewind, snapshot, and viewer count controlled by the Vista player.</li>
+              <li><strong>Surf cam:</strong> Corolla Light Resort webcam displayed through the Vista-hosted embed for stream 2O09J4QSEV, with playback, rewind, snapshot, and viewer count controlled by the Vista player.</li>
               <li><strong>Refresh cadence:</strong> Server snapshots are cached briefly to keep the dashboard fast and avoid repeatedly hammering public data providers.</li>
               <li><strong>Local fallback:</strong> The browser keeps the latest valid snapshot in local storage, then clearly marks the dashboard as cached if a refresh fails.</li>
               <li><strong>Known gaps:</strong> Tide predictions are guidance rather than observed water level, buoy observations can lag, and the live cam depends on third-party stream availability.</li>
@@ -331,7 +333,6 @@
     </dialog>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script defer src="https://my.vistawebcams.com/js/vistawebcams-embed.js"></script>
     <script src="/app.js" type="module"></script>
   </body>
 </html>

@@ -1081,18 +1081,8 @@ dd {
   width: 100%;
   aspect-ratio: 16 / 9;
   min-height: 320px;
+  border: 0;
   background: var(--accent-strong);
-}
-
-.webcam-player .video-js,
-.webcam-player video {
-  width: 100% !important;
-  height: 100% !important;
-}
-
-.webcam-player > * {
-  width: 100% !important;
-  height: 100% !important;
 }
 
 .condition-strip {

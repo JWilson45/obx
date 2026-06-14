@@ -98,7 +98,6 @@ const MAP_TILE_THEMES = {
 
 const SNAPSHOT_STORAGE_KEY = "obx-conditions:snapshot:v1";
 const STALE_SNAPSHOT_MS = 30 * 60 * 1000;
-const VISTA_WEBCAM_STREAM = "2O09J4QSEV";
 const themeMediaQuery = window.matchMedia(THEME_QUERY);
 let themePreference = "system";
 
@@ -290,31 +289,6 @@ function closeSourcesDialog() {
     els.sourcesDialog.close();
   } else {
     els.sourcesDialog.removeAttribute("open");
-  }
-}
-
-function initVistaWebcam(retries = 20) {
-  const container = document.querySelector(`[data-vistawebcams-stream="${VISTA_WEBCAM_STREAM}"]`);
-  if (!container || container.dataset.vistawebcamsInitialized === "true" || container._vistawebcamsPlayer) return;
-
-  const Player = window.VistaWebcams?.Player;
-  if (!Player) {
-    if (retries > 0) window.setTimeout(() => initVistaWebcam(retries - 1), 250);
-    return;
-  }
-
-  try {
-    const player = new Player(container, {
-      streamName: VISTA_WEBCAM_STREAM,
-      autoplay: "muted",
-      controls: true
-    });
-    container._vistawebcamsPlayer = player;
-    player.init().catch((error) => {
-      console.error("[OBX] Failed to initialize Vista webcam", error);
-    });
-  } catch (error) {
-    console.error("[OBX] Failed to create Vista webcam player", error);
   }
 }
 
@@ -1243,5 +1217,4 @@ async function load() {
 
 initializeTheme();
 load();
-initVistaWebcam();
 setInterval(updateCacheStatus, 1000);
