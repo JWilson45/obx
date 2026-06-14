@@ -548,6 +548,21 @@ body[data-theme='dark'] .ocean-card .chart-controls.light button[aria-pressed="t
   background: var(--surface-subtle);
 }
 
+.surf-chart-toolbar {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 24px;
+}
+
+.surf-chart-toolbar + .chart-wrap.compact {
+  margin-top: 14px;
+}
+
 .chart-controls {
   position: relative;
   z-index: 1;
@@ -558,6 +573,10 @@ body[data-theme='dark'] .ocean-card .chart-controls.light button[aria-pressed="t
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--control-bg);
+}
+
+.chart-controls.surf-mode-controls {
+  grid-template-columns: repeat(2, minmax(70px, 1fr));
 }
 
 .chart-controls button {
@@ -671,6 +690,14 @@ svg {
   font-size: 0.62rem;
 }
 
+.chart-empty-label {
+  font-family: "Manrope", "Avenir Next", sans-serif;
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .stat-list {
   position: relative;
   z-index: 1;
@@ -684,6 +711,33 @@ svg {
   padding-top: 14px;
   border-top: 1px solid currentColor;
   opacity: 0.82;
+}
+
+.surf-temp-summary {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.surf-temp-summary div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-subtle) 58%, transparent);
+}
+
+.surf-temp-summary dt,
+.surf-temp-summary dd {
+  min-width: 0;
+}
+
+.surf-temp-summary dd {
+  color: var(--surface-inverse);
+  font-size: 1rem;
 }
 
 dt {
@@ -1668,7 +1722,17 @@ body[data-theme='dark'] .buoy-map .leaflet-tile {
     text-align: left;
   }
 
-  .stat-list {
+  .surf-chart-toolbar {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .surf-chart-toolbar .chart-controls {
+    width: 100%;
+  }
+
+  .stat-list,
+  .surf-temp-summary {
     grid-template-columns: 1fr;
   }
 

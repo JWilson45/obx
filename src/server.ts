@@ -164,6 +164,13 @@ function paToInHg(value?: number) {
   return Number.isFinite(value) ? value / 3386.389 : undefined;
 }
 
+function dewPointFromHumidityF(temperatureF?: number, humidity?: number) {
+  if (!Number.isFinite(temperatureF) || !Number.isFinite(humidity) || humidity! <= 0) return undefined;
+  const temperatureC = (temperatureF! - 32) * 5 / 9;
+  const alpha = Math.log(humidity! / 100) + (17.625 * temperatureC) / (243.04 + temperatureC);
+  return ((243.04 * alpha) / (17.625 - alpha)) * 9 / 5 + 32;
+}
+
 function directionFromDegrees(degrees?: number) {
   if (!Number.isFinite(degrees)) return undefined;
   const names = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
@@ -177,8 +184,18 @@ function isoUtc(parts: string[]) {
 
 function downsample<T>(items: T[], target = 96): T[] {
   if (items.length <= target) return items;
-  const stride = Math.ceil(items.length / target);
-  return items.filter((_, index) => index % stride === 0).slice(-target);
+  if (target <= 1) return [items.at(-1)!];
+
+  const lastIndex = items.length - 1;
+  const sampled: T[] = [];
+  let previousIndex = -1;
+  for (let index = 0; index < target; index++) {
+    const itemIndex = Math.round((index / (target - 1)) * lastIndex);
+    if (itemIndex === previousIndex) continue;
+    sampled.push(items[itemIndex]);
+    previousIndex = itemIndex;
+  }
+  return sampled;
 }
 
 function recentWindow<T extends { time: string }>(items: T[], days: number, latestTime?: string) {
@@ -201,6 +218,18 @@ function rangeByDays<T extends { time: string }>(items: T[], key: keyof T) {
       .filter(Number.isFinite) as number[];
     return [String(days), values.length ? { min: Math.min(...values), max: Math.max(...values) } : undefined];
   }));
+}
+
+function changeByHours<T extends { time: string }>(items: T[], key: keyof T, hours: number) {
+  const valid = items
+    .filter((item) => Number.isFinite(item[key]) && Number.isFinite(new Date(item.time).getTime()))
+    .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+  const latest = valid.at(-1);
+  if (!latest) return undefined;
+
+  const targetMs = new Date(latest.time).getTime() - hours * 60 * 60 * 1000;
+  const previous = [...valid].reverse().find((item) => new Date(item.time).getTime() <= targetMs);
+  return previous ? (latest[key] as number) - (previous[key] as number) : undefined;
 }
 
 function milesBetween(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
@@ -354,6 +383,8 @@ async function getMarine() {
     history: series,
     series: downsample(recentWindow(chronologicalSeries, 7), 120),
     seriesByDays: seriesByDays(chronologicalSeries, 120),
+    waterTempRangeByDays: rangeByDays(chronologicalSeries, "waterTempF"),
+    waterTempChange24h: changeByHours(chronologicalSeries, "waterTempF", 24),
     spectral: parseNdbcSpectral(spectralText),
     source: "https://www.ndbc.noaa.gov/station_page.php?station=44056"
   };
@@ -525,6 +556,7 @@ async function getNwsWeather() {
   return {
     station: firstStation,
     temperatureF: cToF(asNumber(props.temperature?.value)),
+    dewPointF: cToF(asNumber(props.dewpoint?.value)),
     humidity: asNumber(props.relativeHumidity?.value),
     pressureInHg: paToInHg(asNumber(props.barometricPressure?.value)),
     windDirection: directionFromDegrees(asNumber(props.windDirection?.value)),
@@ -572,16 +604,20 @@ async function getWeather() {
   const apiTemp = stemData ? findWeatherStemSensor(stemData, ["thermometer", "temperature"]) : undefined;
   const apiHumidity = stemData ? findWeatherStemSensor(stemData, ["hygrometer", "humidity"]) : undefined;
   const apiPressure = stemData ? findWeatherStemSensor(stemData, ["barometer", "pressure"]) : undefined;
+  const apiDewPoint = stemData ? findWeatherStemSensor(stemData, ["dew point", "dewpoint"]) : undefined;
 
   const wind = nwsData?.forecastWind ||
     (Number.isFinite(nwsData?.windSpeedMph) ? `${nwsData?.windDirection ?? ""} ${Math.round(nwsData!.windSpeedMph!)} mph`.trim() : undefined);
+  const temperatureF = apiTemp ?? stemTemp ?? nwsData?.temperatureF ?? nwsData?.forecastTemperatureF;
+  const humidity = apiHumidity ?? nwsData?.humidity;
 
   return {
     source: "https://currituck.weatherstem.com/ccemcarovabeach",
     station: "CCEM Carova Beach Fire Department",
-    temperatureF: apiTemp ?? stemTemp ?? nwsData?.temperatureF ?? nwsData?.forecastTemperatureF,
-    humidity: apiHumidity ?? nwsData?.humidity,
+    temperatureF,
+    humidity,
     pressureInHg: apiPressure ?? nwsData?.pressureInHg,
+    dewPointF: apiDewPoint ?? nwsData?.dewPointF ?? dewPointFromHumidityF(temperatureF, humidity),
     wind,
     precipChance: nwsData?.precipChance,
     summary: nwsData?.summary,

@@ -18,10 +18,14 @@ const els = {
   wavePeriod: document.querySelector("#wave-period"),
   waveDirection: document.querySelector("#wave-direction"),
   waveChart: document.querySelector("#wave-chart"),
+  surfChartMode: document.querySelector("#surf-chart-mode"),
   waveChartControls: document.querySelector("#wave-chart-controls"),
   swell: document.querySelector("#swell"),
   windWave: document.querySelector("#wind-wave"),
   marineAir: document.querySelector("#marine-air"),
+  surfTempTrend: document.querySelector("#surf-temp-trend"),
+  surfTempRangeLabel: document.querySelector("#surf-temp-range-label"),
+  surfTempRange: document.querySelector("#surf-temp-range"),
   marineWind: document.querySelector("#marine-wind"),
   marinePressure: document.querySelector("#marine-pressure"),
   marineDew: document.querySelector("#marine-dew"),
@@ -69,6 +73,7 @@ const mapState = {
 const chartState = {
   soundDays: 7,
   waveDays: 7,
+  surfSeries: "water",
   forecastMode: "hourly",
   data: null,
   usingStoredSnapshot: false,
@@ -113,10 +118,21 @@ const oneDecimal = (value) => Number.isFinite(value) ? value.toFixed(1) : "--";
 const zeroDecimal = (value) => Number.isFinite(value) ? Math.round(value).toString() : "--";
 const milesPerHour = (value) => Number.isFinite(value) ? value * 2.23694 : undefined;
 const hpaToInHg = (value) => Number.isFinite(value) ? value / 33.86389 : undefined;
+const dewPointFromHumidityF = (temperatureF, humidity) => {
+  if (!Number.isFinite(temperatureF) || !Number.isFinite(humidity) || humidity <= 0) return undefined;
+  const temperatureC = (temperatureF - 32) * 5 / 9;
+  const alpha = Math.log(humidity / 100) + (17.625 * temperatureC) / (243.04 + temperatureC);
+  return ((243.04 * alpha) / (17.625 - alpha)) * 9 / 5 + 32;
+};
 const signed = (value, unit) => {
   if (!Number.isFinite(value)) return "--";
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toFixed(2)} ${unit}`;
+};
+const signedOneDecimal = (value, unit) => {
+  if (!Number.isFinite(value)) return "--";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(1)} ${unit}`;
 };
 
 function readThemePreference() {
@@ -170,6 +186,15 @@ function getThemePalette(theme = getResolvedTheme()) {
         cursorText: "#eefbf7",
         markerText: "#eefbf7"
       },
+      water: {
+        line: "#f4b18a",
+        fill: "rgba(244, 177, 138, 0.2)",
+        grid: "rgba(238, 251, 247, 0.24)",
+        label: "rgba(238, 251, 247, 0.72)",
+        cursorBg: "rgba(9, 57, 68, 0.82)",
+        cursorText: "#eefbf7",
+        markerText: "#eefbf7"
+      },
       tide: {
         fill: "rgba(15, 93, 109, 0.14)",
         line: "#0f5d6d",
@@ -195,6 +220,15 @@ function getThemePalette(theme = getResolvedTheme()) {
     wave: {
       line: "#b8e8f5",
       fill: "rgba(173, 224, 236, 0.2)",
+      grid: "rgba(238, 251, 247, 0.24)",
+      label: "rgba(238, 251, 247, 0.8)",
+      cursorBg: "rgba(9, 57, 68, 0.86)",
+      cursorText: "#f4f8f9",
+      markerText: "#f4f8f9"
+    },
+    water: {
+      line: "#f6c09f",
+      fill: "rgba(246, 192, 159, 0.2)",
       grid: "rgba(238, 251, 247, 0.24)",
       label: "rgba(238, 251, 247, 0.8)",
       cursorBg: "rgba(9, 57, 68, 0.86)",
@@ -488,9 +522,27 @@ function valueRange(points, key) {
   return values.length ? { min: Math.min(...values), max: Math.max(...values) } : undefined;
 }
 
+function valueChangeHours(points, key, hours = 24) {
+  const valid = (points || [])
+    .filter((point) => Number.isFinite(point[key]) && Number.isFinite(new Date(point.time).getTime()))
+    .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+  const latest = valid.at(-1);
+  if (!latest) return undefined;
+
+  const targetMs = new Date(latest.time).getTime() - hours * 60 * 60 * 1000;
+  const previous = [...valid].reverse().find((point) => new Date(point.time).getTime() <= targetMs);
+  return previous ? latest[key] - previous[key] : undefined;
+}
+
 function syncChartControls(group, selectedDays) {
   group?.querySelectorAll("button[data-days]").forEach((button) => {
     button.setAttribute("aria-pressed", String(Number(button.dataset.days) === selectedDays));
+  });
+}
+
+function syncSurfSeriesControls() {
+  els.surfChartMode?.querySelectorAll("button[data-surf-series]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.surfSeries === chartState.surfSeries));
   });
 }
 
@@ -521,16 +573,34 @@ function renderTopCharts() {
   }
 
   if (marine?.latest) {
-    const wavePoints = chartSeries(marine, chartState.waveDays);
-    els.waveChart?.setAttribute("aria-label", `${rangeLabel(chartState.waveDays)} wave height chart`);
-    renderSparkline(els.waveChart, wavePoints, "waveHeightFt", "ft", {
+    const surfPoints = chartSeries(marine, chartState.waveDays);
+    const waterRange = marine.waterTempRangeByDays?.[chartState.waveDays] ||
+      marine.waterTempRangeByDays?.[String(chartState.waveDays)] ||
+      valueRange(surfPoints, "waterTempF");
+    const waterChange24h = Number.isFinite(marine.waterTempChange24h)
+      ? marine.waterTempChange24h
+      : valueChangeHours(chartSeries(marine, 7), "waterTempF", 24);
+    setText(els.surfTempRangeLabel, `${rangeLabel(chartState.waveDays)} water range`);
+    setText(els.surfTempTrend, signedOneDecimal(waterChange24h, "°F"));
+    setText(els.surfTempRange, waterRange
+      ? `${oneDecimal(waterRange.min)}-${oneDecimal(waterRange.max)} °F`
+      : "--");
+
+    const isWater = chartState.surfSeries === "water";
+    const chartKey = isWater ? "waterTempF" : "waveHeightFt";
+    const chartUnit = isWater ? "°F" : "ft";
+    const chartLabel = isWater ? "water temperature" : "wave height";
+    els.waveChart?.setAttribute("aria-label", `${rangeLabel(chartState.waveDays)} ${chartLabel} chart`);
+    renderSparkline(els.waveChart, surfPoints, chartKey, chartUnit, {
       days: chartState.waveDays,
-      ...palette.wave
+      emptyLabel: `No ${chartLabel} history`,
+      ...(isWater ? palette.water : palette.wave)
     });
   }
 
   syncChartControls(els.soundChartControls, chartState.soundDays);
   syncChartControls(els.waveChartControls, chartState.waveDays);
+  syncSurfSeriesControls();
   renderWindPrediction(chartState.data?.weather);
 }
 
@@ -567,13 +637,32 @@ function renderWindPrediction(weather) {
 }
 
 function renderSparkline(svg, points, key, unit = "", options = {}) {
-  if (!svg || !Array.isArray(points) || points.length < 2) {
-    if (svg) svg.innerHTML = "";
+  if (!svg) return;
+
+  const palette = {
+    lineColor: options.lineColor ?? options.line ?? "#0f5d6d",
+    fillColor: options.fillColor ?? options.fill ?? "rgba(15, 93, 109, 0.14)",
+    gridColor: options.gridColor ?? options.grid ?? "rgba(19, 36, 34, 0.16)",
+    labelColor: options.labelColor ?? options.label ?? "rgba(19, 36, 34, 0.56)",
+    cursorLabelColor: options.cursorLabelColor ?? options.cursorText ?? "#093944",
+    cursorBgColor: options.cursorBgColor ?? options.cursorBg ?? "rgba(255, 250, 240, 0.92)"
+  };
+  const chartPoints = Array.isArray(points)
+    ? points.filter((point) => Number.isFinite(point[key]) && Number.isFinite(new Date(point.time).getTime()))
+    : [];
+
+  if (chartPoints.length < 2) {
+    svg.classList.remove("has-chart-cursor");
+    svg.setAttribute("viewBox", "0 0 640 180");
+    svg.innerHTML = options.emptyLabel
+      ? `<text class="chart-empty-label" x="320" y="94" text-anchor="middle" fill="${palette.labelColor}">${escapeHtml(options.emptyLabel)}</text>`
+      : "";
     return;
   }
 
-  const values = points.map((point) => point[key]).filter(Number.isFinite);
+  const values = chartPoints.map((point) => point[key]).filter(Number.isFinite);
   if (!values.length) {
+    svg.classList.remove("has-chart-cursor");
     svg.innerHTML = "";
     return;
   }
@@ -590,9 +679,9 @@ function renderSparkline(svg, points, key, unit = "", options = {}) {
   const usableW = width - padLeft - padRight;
   const usableH = height - padTop - padBottom;
 
-  const coords = points.map((point, index) => {
-    const value = Number.isFinite(point[key]) ? point[key] : min;
-    const x = padLeft + (index / (points.length - 1)) * usableW;
+  const coords = chartPoints.map((point, index) => {
+    const value = point[key];
+    const x = padLeft + (index / (chartPoints.length - 1)) * usableW;
     const y = padTop + (1 - (value - min) / spread) * usableH;
     return [x, y];
   });
@@ -605,21 +694,12 @@ function renderSparkline(svg, points, key, unit = "", options = {}) {
   const xTickCount = isOneDay ? 5 : 7;
   const xTicks = Array.from({ length: xTickCount }, (_, index) => {
     const ratio = xTickCount === 1 ? 0 : index / (xTickCount - 1);
-    const pointIndex = Math.min(points.length - 1, Math.round(ratio * (points.length - 1)));
+    const pointIndex = Math.min(chartPoints.length - 1, Math.round(ratio * (chartPoints.length - 1)));
     return {
       x: padLeft + ratio * usableW,
-      label: isOneDay ? hourLabel(points[pointIndex]?.time) : shortTickLabel(points[pointIndex]?.time)
+      label: isOneDay ? hourLabel(chartPoints[pointIndex]?.time) : shortTickLabel(chartPoints[pointIndex]?.time)
     };
   });
-  const palette = {
-    lineColor: "#0f5d6d",
-    fillColor: "rgba(15, 93, 109, 0.14)",
-    gridColor: "rgba(19, 36, 34, 0.16)",
-    labelColor: "rgba(19, 36, 34, 0.56)",
-    cursorLabelColor: "#093944",
-    cursorBgColor: "rgba(255, 250, 240, 0.92)",
-    ...options
-  };
 
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.classList.add("has-chart-cursor");
@@ -648,7 +728,7 @@ function renderSparkline(svg, points, key, unit = "", options = {}) {
     <rect class="chart-hit-area" x="${padLeft}" y="${padTop}" width="${usableW}" height="${usableH}" fill="transparent"></rect>
   `;
 
-  bindChartCursor(svg, points, coords, key, unit, {
+  bindChartCursor(svg, chartPoints, coords, key, unit, {
     padLeft,
     padRight,
     padTop,
@@ -1122,9 +1202,20 @@ function render(data) {
     const marineWindMph = milesPerHour(marine.latest.windSpeedMps);
     setText(els.marineWind, Number.isFinite(marineWindMph)
       ? `${zeroDecimal(marineWindMph)} mph${Number.isFinite(marine.latest.windGustMps) ? ` gust ${zeroDecimal(milesPerHour(marine.latest.windGustMps))}` : ""}`
-      : "--");
-    setText(els.marinePressure, Number.isFinite(marine.latest.pressureHpa) ? `${hpaToInHg(marine.latest.pressureHpa).toFixed(2)} in` : "--");
-    setText(els.marineDew, Number.isFinite(marine.latest.dewPointF) ? `${oneDecimal(marine.latest.dewPointF)} °F` : "--");
+      : weather?.wind || "--");
+    setText(els.marinePressure, Number.isFinite(marine.latest.pressureHpa)
+      ? `${hpaToInHg(marine.latest.pressureHpa).toFixed(2)} in`
+      : Number.isFinite(weather?.pressureInHg)
+        ? `${weather.pressureInHg.toFixed(2)} in`
+        : "--");
+    const weatherDewPointF = Number.isFinite(weather?.dewPointF)
+      ? weather.dewPointF
+      : dewPointFromHumidityF(weather?.temperatureF, weather?.humidity);
+    setText(els.marineDew, Number.isFinite(marine.latest.dewPointF)
+      ? `${oneDecimal(marine.latest.dewPointF)} °F`
+      : Number.isFinite(weatherDewPointF)
+        ? `${oneDecimal(weatherDewPointF)} °F`
+        : "--");
   }
 
   renderTopCharts();
@@ -1155,6 +1246,13 @@ function bindChartControls(group, stateKey) {
 
 bindChartControls(els.soundChartControls, "soundDays");
 bindChartControls(els.waveChartControls, "waveDays");
+
+els.surfChartMode?.querySelectorAll("button[data-surf-series]").forEach((button) => {
+  button.addEventListener("click", () => {
+    chartState.surfSeries = button.dataset.surfSeries === "water" ? "water" : "waves";
+    renderTopCharts();
+  });
+});
 
 els.forecastControls?.querySelectorAll("button[data-forecast-mode]").forEach((button) => {
   button.addEventListener("click", () => {

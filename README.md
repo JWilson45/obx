@@ -62,7 +62,7 @@ Runtime-created local database files live under `data/` by default and are ignor
 - Realtime feed: `https://www.ndbc.noaa.gov/data/realtime2/44056.txt`
 - Spectral feed: `https://www.ndbc.noaa.gov/data/realtime2/44056.spec`
 
-The realtime parser stores wave height, dominant/average period, mean wave direction, wind direction/speed/gust, pressure, air temperature, water temperature, dew point, visibility, pressure tendency, and tide when those columns are reported. The dashboard surfaces the most decision-useful subset for Carova 4x4 travel: waves, water temperature, period/direction, wind, pressure, and dew point.
+The realtime parser stores wave height, dominant/average period, mean wave direction, wind direction/speed/gust, pressure, air temperature, water temperature, dew point, visibility, pressure tendency, and tide when those columns are reported. The dashboard surfaces the most decision-useful subset for Carova 4x4 travel: waves, recent water-temperature history, period/direction, and nearby wind/pressure/dew point fallbacks when Duck FRF leaves those fields blank.
 
 ### Buoy Temperature Map
 
@@ -246,6 +246,7 @@ The frontend is deliberately framework-free:
 
 - `public/app.js` polls `/api/snapshot` every 2 minutes.
 - Sparkline charts are rendered as inline SVG paths.
+- The Surf tile can toggle the Duck FRF chart between wave height and water temperature while keeping the same 1, 7, and 30 day windows.
 - The buoy map uses Leaflet with OpenStreetMap tiles, station-coordinate markers, popups, and a one-mile VA/NC-line reference circle.
 - The visual design uses glassy cards over a generated OBX background with readability overlays.
 - Theme behavior:

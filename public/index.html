@@ -92,25 +92,31 @@
           </div>
           <div class="surf-split">
             <div>
-              <span class="metric-value" id="wave-height">--</span>
-              <span class="metric-unit">ft waves</span>
-              <p id="wave-period">--</p>
-            </div>
-            <div>
               <span class="metric-value" id="water-temp">--</span>
               <span class="metric-unit">°F water</span>
               <p id="wave-direction">--</p>
             </div>
+            <div>
+              <span class="metric-value" id="wave-height">--</span>
+              <span class="metric-unit">ft waves</span>
+              <p id="wave-period">--</p>
+            </div>
+          </div>
+          <div class="surf-chart-toolbar">
+            <div class="chart-controls light surf-mode-controls" id="surf-chart-mode" aria-label="Surf chart data">
+              <button type="button" data-surf-series="water" aria-pressed="true">Water</button>
+              <button type="button" data-surf-series="waves" aria-pressed="false">Waves</button>
+            </div>
+            <div class="chart-controls light" id="wave-chart-controls" aria-label="Surf chart range">
+              <button type="button" data-days="1" aria-pressed="false">1d</button>
+              <button type="button" data-days="7" aria-pressed="true">7d</button>
+              <button type="button" data-days="30" aria-pressed="false">30d</button>
+            </div>
           </div>
           <div class="chart-wrap compact">
-            <svg id="wave-chart" role="img" aria-label="7 day wave height chart"></svg>
+            <svg id="wave-chart" role="img" aria-label="7 day water temperature chart"></svg>
           </div>
-          <div class="chart-controls light" id="wave-chart-controls" aria-label="Wave height chart range">
-            <button type="button" data-days="1" aria-pressed="false">1d</button>
-            <button type="button" data-days="7" aria-pressed="true">7d</button>
-            <button type="button" data-days="30" aria-pressed="false">30d</button>
-          </div>
-          <dl class="stat-list">
+          <dl class="stat-list surf-breakdown-list">
             <div>
               <dt>Swell</dt>
               <dd id="swell">--</dd>
@@ -122,6 +128,16 @@
             <div>
               <dt>Air temp</dt>
               <dd id="marine-air">--</dd>
+            </div>
+          </dl>
+          <dl class="surf-temp-summary">
+            <div>
+              <dt>24h water change</dt>
+              <dd id="surf-temp-trend">--</dd>
+            </div>
+            <div>
+              <dt id="surf-temp-range-label">7d water range</dt>
+              <dd id="surf-temp-range">--</dd>
             </div>
           </dl>
           <div class="condition-strip light">
@@ -303,7 +319,7 @@
             <h3>Core water feeds</h3>
             <ul>
               <li><strong>Currituck Sound level:</strong> USGS station 02043433, instantaneous gage height on the east bank at Corolla, shown with 1, 7, and 30 day chart windows.</li>
-              <li><strong>Duck FRF surf buoy:</strong> NOAA NDBC station 44056 realtime observations for wave height, water temperature, wind, air temperature, pressure, and dew point.</li>
+              <li><strong>Duck FRF surf buoy:</strong> NOAA NDBC station 44056 realtime observations for wave height, recent water temperature history, and air temperature; nearby Carova/NWS weather fills wind, pressure, and dew point when the buoy leaves those fields blank.</li>
               <li><strong>Swell details:</strong> NOAA NDBC spectral feed for 44056, used for dominant swell and wind-wave breakdown when the spectral file is fresh.</li>
               <li><strong>Atlantic tides:</strong> NOAA CO-OPS high/low predictions for Sandbridge, VA station 8639428, used because it is the closest tide-prediction station currently modeled for the VA/NC line oceanfront.</li>
             </ul>
