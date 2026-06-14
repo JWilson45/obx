@@ -1718,8 +1718,191 @@ body[data-theme='dark'] .buoy-map .leaflet-tile {
     justify-self: start;
   }
 
+  #weather-card .card-top {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: start;
+  }
+
+  #weather-card .source-link {
+    justify-self: end;
+    padding: 7px 10px;
+    font-size: 0.62rem;
+  }
+
+  #weather-card .weather-current {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    margin-top: 18px;
+  }
+
+  #weather-card .metric-value {
+    font-size: clamp(3.4rem, 18vw, 4.4rem);
+    letter-spacing: 0;
+  }
+
+  #weather-card .metric-unit {
+    margin-left: 2px;
+    font-size: 0.82rem;
+  }
+
+  #weather-card .weather-current p {
+    margin-top: 4px;
+    font-size: 0.82rem;
+    line-height: 1.25;
+  }
+
+  #weather-card .wind-badge {
+    width: 86px;
+    height: 86px;
+    transform: rotate(3deg);
+  }
+
+  #weather-card .wind-badge span {
+    max-width: 70px;
+    font-size: 0.76rem;
+    line-height: 1.2;
+  }
+
+  #weather-card .wind-badge small {
+    font-size: 0.58rem;
+    letter-spacing: 0.06em;
+  }
+
+  #weather-card .stat-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  #weather-card .stat-list div {
+    min-width: 0;
+    padding: 10px 8px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-subtle);
+  }
+
+  #weather-card .stat-list dt {
+    font-size: 0.58rem;
+    letter-spacing: 0.04em;
+  }
+
+  #weather-card .stat-list dd {
+    margin-top: 5px;
+    font-size: 0.8rem;
+    line-height: 1.2;
+  }
+
+  #weather-card .forecast-panel {
+    margin-top: 16px;
+  }
+
+  #weather-card .mini-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: end;
+    margin-bottom: 8px;
+  }
+
+  #weather-card .mini-heading .eyebrow {
+    font-size: 0.58rem;
+  }
+
+  #weather-card .mini-heading h3 {
+    margin: 0;
+    font-size: 1rem;
+  }
+
+  #weather-card .forecast-controls {
+    width: 100%;
+    margin-bottom: 8px;
+  }
+
+  #weather-card .forecast-list {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scroll-snap-type: x proximity;
+  }
+
+  #weather-card .forecast-item {
+    flex: 0 0 min(190px, 62vw);
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 8px;
+    align-content: start;
+    min-height: 0;
+    padding: 10px 11px;
+    border-radius: 12px;
+    scroll-snap-align: start;
+  }
+
+  #weather-card .forecast-item.daily {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  #weather-card .forecast-item strong {
+    grid-column: 1;
+    grid-row: 1;
+    font-size: 0.74rem;
+  }
+
+  #weather-card .forecast-item span:first-of-type {
+    grid-column: 2;
+    grid-row: 1;
+    font-size: 0.94rem;
+    line-height: 1;
+    text-align: right;
+  }
+
+  #weather-card .forecast-item span:nth-of-type(2) {
+    display: -webkit-box;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    overflow: hidden;
+    min-height: 2.35em;
+    line-height: 1.18;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  #weather-card .forecast-item small {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    line-height: 1.2;
+  }
+
   .surf-split > div:last-child {
     text-align: left;
+  }
+
+  .ocean-card .surf-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: 10px;
+    align-items: start;
+  }
+
+  .ocean-card .surf-split > div:last-child {
+    text-align: right;
+  }
+
+  .ocean-card .metric-value {
+    font-size: clamp(3.15rem, 18vw, 4.8rem);
+    letter-spacing: 0;
+  }
+
+  .ocean-card .metric-unit {
+    margin-left: 2px;
+    font-size: 0.78rem;
+  }
+
+  .ocean-card .surf-split p {
+    font-size: 0.78rem;
+    line-height: 1.25;
   }
 
   .surf-chart-toolbar {
@@ -1731,23 +1914,71 @@ body[data-theme='dark'] .buoy-map .leaflet-tile {
     width: 100%;
   }
 
-  .stat-list,
-  .surf-temp-summary {
+  .stat-list {
     grid-template-columns: 1fr;
   }
 
-  .condition-strip,
+  .condition-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .condition-strip div {
+    padding: 10px 8px;
+  }
+
+  .condition-strip span {
+    font-size: 0.58rem;
+    letter-spacing: 0.04em;
+  }
+
+  .condition-strip strong {
+    font-size: 0.78rem;
+  }
+
+  .surf-temp-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .surf-temp-summary div {
+    padding: 10px;
+  }
+
+  .surf-temp-summary dt {
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+  }
+
+  .surf-temp-summary dd {
+    font-size: 0.88rem;
+  }
+
   .forecast-item {
-    grid-template-columns: 1fr;
+    grid-template-columns: 54px 44px minmax(0, 1fr);
+  }
+
+  .forecast-item.daily {
+    grid-template-columns: 70px 44px minmax(0, 1fr);
   }
 
   .forecast-item small {
-    grid-column: auto;
+    grid-column: 3;
   }
 
-  .wind-badge {
-    width: 108px;
-    height: 108px;
+  .forecast-item span,
+  .forecast-item small {
+    overflow-wrap: anywhere;
+  }
+
+  .forecast-item strong {
+    font-size: 0.78rem;
+  }
+
+  .forecast-item span {
+    font-size: 0.8rem;
+  }
+
+  .forecast-item small {
+    font-size: 0.68rem;
   }
 
   .buoy-map {
