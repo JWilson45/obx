@@ -819,6 +819,147 @@ export function getHistory(kind: string, limit = 250) {
   `).all(boundedLimit);
 }
 
+type BuoyTrendStation = {
+  stationId: string;
+  stationName: string;
+  zone: string;
+  lat: number;
+  lon: number;
+  distanceFromVaNcLineMiles?: number;
+  latestTime?: string;
+  latestWaterTempF?: number;
+  latestAgeHours?: number;
+  isStale: boolean;
+  change24hF?: number;
+  range7dF?: { min: number; max: number };
+  series7d: Array<{ time: string; waterTempF: number }>;
+};
+
+function finiteOrUndefined(value: unknown) {
+  if (value === null || value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function downsampleSeries<T>(items: T[], target = 48) {
+  if (items.length <= target) return items;
+  const result: T[] = [];
+  const lastIndex = items.length - 1;
+  for (let index = 0; index < target; index++) {
+    result.push(items[Math.round((index / (target - 1)) * lastIndex)]);
+  }
+  return result;
+}
+
+function trendSummaryStation(station: BuoyTrendStation) {
+  return {
+    stationId: station.stationId,
+    stationName: station.stationName,
+    valueF: station.latestWaterTempF,
+    change24hF: station.change24hF
+  };
+}
+
+export function getBuoyTrends() {
+  const db = getDb();
+  const rows = db.query(`
+    SELECT
+      station_id AS stationId,
+      station_name AS stationName,
+      zone,
+      latitude AS lat,
+      longitude AS lon,
+      distance_from_va_nc_line_miles AS distanceFromVaNcLineMiles,
+      time,
+      water_temp_f AS waterTempF,
+      fetched_at AS fetchedAt,
+      is_stale AS isStale
+    FROM buoy_observations
+    WHERE water_temp_f IS NOT NULL
+    ORDER BY station_id ASC, time DESC
+  `).all() as Array<{
+    stationId: string;
+    stationName: string;
+    zone: string;
+    lat: number;
+    lon: number;
+    distanceFromVaNcLineMiles: number | null;
+    time: string;
+    waterTempF: number | null;
+    fetchedAt: string;
+    isStale: number;
+  }>;
+
+  const grouped = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const bucket = grouped.get(row.stationId) ?? [];
+    bucket.push(row);
+    grouped.set(row.stationId, bucket);
+  }
+
+  const stations: BuoyTrendStation[] = Array.from(grouped.values()).map((stationRows) => {
+    const latest = stationRows[0];
+    const latestTimeMs = new Date(latest.time).getTime();
+    const latestTemp = finiteOrUndefined(latest.waterTempF);
+    const target24hMs = latestTimeMs - 24 * 60 * 60 * 1000;
+    const sevenDayMs = latestTimeMs - 7 * 24 * 60 * 60 * 1000;
+    const prior24h = stationRows.find((row) => new Date(row.time).getTime() <= target24hMs);
+    const priorTemp = finiteOrUndefined(prior24h?.waterTempF);
+    const series7d = stationRows
+      .filter((row) => {
+        const timeMs = new Date(row.time).getTime();
+        return Number.isFinite(timeMs) && timeMs >= sevenDayMs && Number.isFinite(row.waterTempF);
+      })
+      .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+      .map((row) => ({ time: row.time, waterTempF: Number(row.waterTempF) }));
+    const values7d = series7d.map((point) => point.waterTempF).filter(Number.isFinite);
+    const latestTimeAgeHours = Number.isFinite(latestTimeMs)
+      ? (Date.now() - latestTimeMs) / (60 * 60 * 1000)
+      : undefined;
+
+    return {
+      stationId: latest.stationId,
+      stationName: latest.stationName,
+      zone: latest.zone,
+      lat: latest.lat,
+      lon: latest.lon,
+      distanceFromVaNcLineMiles: finiteOrUndefined(latest.distanceFromVaNcLineMiles),
+      latestTime: latest.time,
+      latestWaterTempF: latestTemp,
+      latestAgeHours: latestTimeAgeHours,
+      isStale: Boolean(latest.isStale),
+      change24hF: Number.isFinite(latestTemp) && Number.isFinite(priorTemp)
+        ? Number((latestTemp! - priorTemp!).toFixed(1))
+        : undefined,
+      range7dF: values7d.length
+        ? { min: Math.min(...values7d), max: Math.max(...values7d) }
+        : undefined,
+      series7d: downsampleSeries(series7d, 48)
+    };
+  });
+
+  const freshStations = stations.filter((station) => !station.isStale && Number.isFinite(station.latestWaterTempF));
+  const trendStations = freshStations.filter((station) => Number.isFinite(station.change24hF));
+  const warmestFresh = [...freshStations].sort((a, b) => (b.latestWaterTempF ?? -Infinity) - (a.latestWaterTempF ?? -Infinity))[0];
+  const biggestRiseFresh = trendStations
+    .filter((station) => (station.change24hF ?? 0) > 0)
+    .sort((a, b) => (b.change24hF ?? -Infinity) - (a.change24hF ?? -Infinity))[0];
+  const biggestDropFresh = trendStations
+    .filter((station) => (station.change24hF ?? 0) < 0)
+    .sort((a, b) => (a.change24hF ?? Infinity) - (b.change24hF ?? Infinity))[0];
+
+  return {
+    generatedAt: new Date().toISOString(),
+    stations,
+    summary: {
+      freshStationCount: freshStations.length,
+      warmestFresh: warmestFresh ? trendSummaryStation(warmestFresh) : undefined,
+      biggestRiseFresh: biggestRiseFresh ? trendSummaryStation(biggestRiseFresh) : undefined,
+      biggestDropFresh: biggestDropFresh ? trendSummaryStation(biggestDropFresh) : undefined
+    }
+  };
+}
+
 export function getDatabaseStats() {
   const db = getDb();
 

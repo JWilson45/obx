@@ -254,7 +254,7 @@
           </div>
           <p class="map-intro">
             A northern Outer Banks view centered on the VA/NC line oceanfront, with nearby,
-            northern, and offshore buoys plotted by latest water temperature.
+            northern, and offshore buoys plotted by current water temperature and 24 hour movement.
           </p>
           <div class="buoy-layout">
             <div class="buoy-map" id="buoy-map" role="application" aria-label="Interactive map of buoy water temperatures near the northern Outer Banks"></div>
@@ -265,9 +265,20 @@
                   <small>fresh buoys</small>
                 </div>
                 <div>
-                  <span id="buoy-range">--</span>
-                  <small>water temp range</small>
+                  <span id="buoy-warmest">--</span>
+                  <small>warmest fresh</small>
                 </div>
+                <div>
+                  <span id="buoy-rise">--</span>
+                  <small>biggest 24h rise</small>
+                </div>
+                <div>
+                  <span id="buoy-drop">--</span>
+                  <small>biggest 24h drop</small>
+                </div>
+              </div>
+              <div class="buoy-detail" id="buoy-detail" aria-live="polite">
+                <div class="buoy-detail-empty">Loading buoy movement...</div>
               </div>
               <div class="buoy-list" id="buoy-list"></div>
               <p class="note" id="buoy-note">Loading NOAA buoy network...</p>

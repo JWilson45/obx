@@ -1,4 +1,4 @@
-import { getCachedSnapshot, getDatabaseStats, getHistory, normalizeHistoryLimit, persistSnapshot } from "./db";
+import { getBuoyTrends, getCachedSnapshot, getDatabaseStats, getHistory, normalizeHistoryLimit, persistSnapshot } from "./db";
 import { stat } from "node:fs/promises";
 
 const PORT = Number(Bun.env.PORT || 3000);
@@ -737,6 +737,10 @@ Bun.serve({
         limit: safeLimit,
         rows: getHistory(kind, safeLimit)
       });
+    }
+
+    if (url.pathname === "/api/buoy-trends") {
+      return json(getBuoyTrends());
     }
 
     if (url.pathname === "/api/db/stats") {

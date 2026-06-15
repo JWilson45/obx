@@ -51,7 +51,10 @@ const els = {
   buoyMap: document.querySelector("#buoy-map"),
   buoyList: document.querySelector("#buoy-list"),
   buoyCount: document.querySelector("#buoy-count"),
-  buoyRange: document.querySelector("#buoy-range"),
+  buoyWarmest: document.querySelector("#buoy-warmest"),
+  buoyRise: document.querySelector("#buoy-rise"),
+  buoyDrop: document.querySelector("#buoy-drop"),
+  buoyDetail: document.querySelector("#buoy-detail"),
   buoyNote: document.querySelector("#buoy-note"),
   themeToggle: document.querySelector("#theme-toggle"),
   themeStatus: document.querySelector("#theme-status"),
@@ -67,7 +70,11 @@ const mapState = {
   baseLayer: null,
   markers: new Map(),
   stations: new Map(),
-  selectedStationId: null
+  trends: new Map(),
+  selectedStationId: null,
+  hoveredStationId: null,
+  bounds: null,
+  resizeTimer: null
 };
 
 const chartState = {
@@ -378,6 +385,16 @@ function writeStoredSnapshot(snapshot) {
   }
 }
 
+async function fetchBuoyTrends() {
+  try {
+    const response = await fetch("/api/buoy-trends", { headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`Buoy trends returned ${response.status}`);
+    return await response.json();
+  } catch {
+    return undefined;
+  }
+}
+
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -401,6 +418,33 @@ function ageLabel(hours) {
   if (hours < 1) return "fresh";
   if (hours < 24) return `${Math.round(hours)}h old`;
   return `${Math.round(hours / 24)}d old`;
+}
+
+function trendBadgeLabel(value) {
+  if (!Number.isFinite(value)) return "--";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(1)}°`;
+}
+
+function movementLabel(value) {
+  if (!Number.isFinite(value)) return "--";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(1)} °F`;
+}
+
+function trendClass(value) {
+  if (!Number.isFinite(value)) return "unknown";
+  if (value > 0.2) return "rise";
+  if (value < -0.2) return "drop";
+  return "flat";
+}
+
+function zoneLabel(zone) {
+  return String(zone || "")
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ") || "Station";
 }
 
 function timeUntilLabel(time) {
@@ -670,12 +714,13 @@ function renderSparkline(svg, points, key, unit = "", options = {}) {
   const min = Math.min(...values);
   const max = Math.max(...values);
   const spread = max - min || 1;
-  const width = 640;
+  const compactChart = chartRenderedWidth(svg) < 430;
   const height = 180;
+  const width = Math.round(height * chartRenderedAspect(svg, 640 / height));
   const padTop = 18;
   const padRight = 18;
   const padBottom = 30;
-  const padLeft = 54;
+  const padLeft = compactChart ? 48 : 54;
   const usableW = width - padLeft - padRight;
   const usableH = height - padTop - padBottom;
 
@@ -691,7 +736,7 @@ function renderSparkline(svg, points, key, unit = "", options = {}) {
   const area = `${line} L ${coords.at(-1)[0].toFixed(2)} ${baselineY} L ${coords[0][0].toFixed(2)} ${baselineY} Z`;
   const yTicks = [max, min + spread / 2, min];
   const isOneDay = options.days === 1;
-  const xTickCount = isOneDay ? 5 : 7;
+  const xTickCount = compactChart ? 4 : isOneDay ? 5 : 7;
   const xTicks = Array.from({ length: xTickCount }, (_, index) => {
     const ratio = xTickCount === 1 ? 0 : index / (xTickCount - 1);
     const pointIndex = Math.min(chartPoints.length - 1, Math.round(ratio * (chartPoints.length - 1)));
@@ -747,11 +792,15 @@ function bindChartCursor(svg, points, coords, key, unit, layout) {
   if (!cursor || !line || !dot || !bg || !valueText || !timeText || !hitArea) return;
 
   const showPoint = (clientX) => {
-    const rect = svg.getBoundingClientRect();
+    const rect = hitArea.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    const x = ratio * layout.width;
-    const pointRatio = Math.min(1, Math.max(0, (x - layout.padLeft) / (layout.width - layout.padLeft - layout.padRight)));
-    const index = Math.min(points.length - 1, Math.max(0, Math.round(pointRatio * (points.length - 1))));
+    const plotWidth = layout.width - layout.padLeft - layout.padRight;
+    const x = layout.padLeft + ratio * plotWidth;
+    const index = coords.reduce((nearestIndex, coord, coordIndex) => {
+      const nearestDistance = Math.abs(coords[nearestIndex][0] - x);
+      const coordDistance = Math.abs(coord[0] - x);
+      return coordDistance < nearestDistance ? coordIndex : nearestIndex;
+    }, 0);
     const [cx, cy] = coords[index];
     const point = points[index];
     const labelX = Math.min(layout.width - 66, Math.max(layout.padLeft + 66, cx));
@@ -797,7 +846,9 @@ function ensureBuoyMap(reference) {
 
   mapState.map = window.L.map(els.buoyMap, {
     scrollWheelZoom: false,
-    zoomControl: true
+    zoomControl: true,
+    zoomSnap: 0.25,
+    zoomDelta: 0.25
   }).setView([reference?.lat ?? 36.55, reference?.lon ?? -75.87], 8);
 
   const tileLayer = createBuoyTileLayer(selectedTheme);
@@ -811,6 +862,24 @@ function ensureBuoyMap(reference) {
   return mapState.map;
 }
 
+function fitBuoyMapBounds() {
+  if (!mapState.map || !mapState.bounds?.length) return;
+  const compactMap = els.buoyMap?.clientWidth < 520;
+  const bounds = window.L.latLngBounds(mapState.bounds).pad(compactMap ? 0.26 : 0.1);
+  mapState.map.invalidateSize();
+  mapState.map.fitBounds(bounds, {
+    animate: false,
+    padding: compactMap ? [80, 72] : [84, 84],
+    maxZoom: compactMap ? 6.35 : 7.65
+  });
+}
+
+function scheduleBuoyMapResize() {
+  if (!mapState.map) return;
+  window.clearTimeout(mapState.resizeTimer);
+  mapState.resizeTimer = window.setTimeout(fitBuoyMapBounds, 120);
+}
+
 function pointOffsetMiles(point, eastMiles = 0, northMiles = 0) {
   const lat = Number(point?.lat);
   const lon = Number(point?.lon);
@@ -820,28 +889,248 @@ function pointOffsetMiles(point, eastMiles = 0, northMiles = 0) {
   return [lat + northMiles / milesPerDegreeLat, lon + eastMiles / milesPerDegreeLon];
 }
 
+function stationWaterTemp(station) {
+  return Number.isFinite(station.latest?.waterTempF)
+    ? station.latest.waterTempF
+    : station.trend?.latestWaterTempF;
+}
+
+function stationAgeHours(station) {
+  return Number.isFinite(station.latestAgeHours)
+    ? station.latestAgeHours
+    : station.trend?.latestAgeHours;
+}
+
+function stationChange24h(station) {
+  return station.trend?.change24hF;
+}
+
+function stationDistanceLabel(station) {
+  return Number.isFinite(station.distanceFromVaNcLineMiles)
+    ? `${oneDecimal(station.distanceFromVaNcLineMiles)} mi from VA/NC line`
+    : "distance unknown";
+}
+
+function freshnessLabel(station) {
+  const age = ageLabel(stationAgeHours(station));
+  if (station.isStale) return `Stale · ${age}`;
+  return age === "fresh" ? "Fresh" : `Fresh · ${age}`;
+}
+
+function mergeBuoyTrends(stations, trends) {
+  const trendById = new Map((trends?.stations || []).map((trend) => [trend.stationId, trend]));
+  return stations.map((station) => ({
+    ...station,
+    trend: trendById.get(station.id)
+  }));
+}
+
+function sortBuoyStations(stations) {
+  return [...stations].sort((a, b) => {
+    const staleDelta = Number(Boolean(a.isStale)) - Number(Boolean(b.isStale));
+    if (staleDelta) return staleDelta;
+    const aMove = Number.isFinite(stationChange24h(a)) ? Math.abs(stationChange24h(a)) : -1;
+    const bMove = Number.isFinite(stationChange24h(b)) ? Math.abs(stationChange24h(b)) : -1;
+    if (bMove !== aMove) return bMove - aMove;
+    const distanceDelta = (a.distanceFromVaNcLineMiles ?? Infinity) - (b.distanceFromVaNcLineMiles ?? Infinity);
+    if (distanceDelta) return distanceDelta;
+    return String(a.id).localeCompare(String(b.id));
+  });
+}
+
+function chooseDefaultBuoy(stations) {
+  const current = stations.find((station) => station.id === mapState.selectedStationId);
+  if (current) return current.id;
+  return stations.find((station) => !station.isStale && Number.isFinite(stationChange24h(station)))?.id
+    || stations.find((station) => !station.isStale)?.id
+    || stations[0]?.id
+    || null;
+}
+
+function stationCalloutLayout(station) {
+  const compactMap = (els.buoyMap?.clientWidth || window.innerWidth) < 520;
+  const offsets = compactMap ? {
+    "44056": [58, 82],
+    "44100": [-80, -70],
+    "44099": [-96, -82],
+    "44014": [78, -78],
+    "44086": [-102, 76],
+    "44079": [70, 28],
+    "41082": [84, 104],
+    "41083": [-86, 104]
+  } : {
+    "44056": [62, 22],
+    "44100": [-70, -42],
+    "44099": [-42, -48],
+    "44014": [92, -50],
+    "44086": [-118, 80],
+    "44079": [105, 10],
+    "41082": [104, 86],
+    "41083": [-68, 86]
+  };
+  const [x, y] = offsets[station.id] || [0, 0];
+  const distance = Math.hypot(x, y);
+  const calloutRadius = compactMap ? 28 : 42;
+  return {
+    x,
+    y,
+    leaderWidth: Math.max(0, distance - calloutRadius),
+    leaderAngle: Math.atan2(y, x) * 180 / Math.PI
+  };
+}
+
+function buoyStationIcon(station) {
+  return window.L.divIcon({
+    className: "leaflet-div-icon buoy-leaflet-icon",
+    html: markerHtml(station),
+    iconSize: [1, 1],
+    iconAnchor: [0, 0]
+  });
+}
+
 function markerHtml(station) {
-  const temp = station.latest?.waterTempF;
-  const label = Number.isFinite(temp) ? `${oneDecimal(temp)}°` : "--";
+  const temp = stationWaterTemp(station);
+  const change = stationChange24h(station);
+  const isSelected = mapState.selectedStationId === station.id;
+  const isHovered = mapState.hoveredStationId === station.id;
+  const layout = stationCalloutLayout(station);
+  const stationShortName = station.name?.replace(/,?\s*(VA|NC)$/i, "") || station.id;
+  const tempLabel = Number.isFinite(temp) ? `${oneDecimal(temp)}°` : "--";
+  const changeLabel = trendBadgeLabel(change);
   return `
-    <div class="buoy-marker ${station.isStale ? "stale" : ""} ${mapState.selectedStationId === station.id ? "selected" : ""}" style="background:${tempColor(temp)}">
-      <strong>${escapeHtml(label)}</strong>
-      <span>${escapeHtml(station.id)}</span>
+    <div
+      data-station-id="${escapeHtml(station.id)}"
+      aria-label="${escapeHtml(`${station.id} ${station.name}: ${tempLabel} water, ${changeLabel} in 24 hours`)}"
+      class="buoy-marker ${station.isStale ? "stale" : ""} ${isSelected ? "selected" : ""} ${isHovered ? "hovered" : ""} ${trendClass(change)}"
+      style="--buoy-temp-color:${tempColor(temp)}; --callout-x:${layout.x}px; --callout-y:${layout.y}px; --leader-width:${layout.leaderWidth.toFixed(1)}px; --leader-angle:${layout.leaderAngle.toFixed(1)}deg"
+    >
+      <span class="buoy-marker-leader" aria-hidden="true"></span>
+      <span class="buoy-marker-pin" aria-hidden="true"></span>
+      <span class="buoy-marker-callout">
+        <strong class="buoy-marker-temp">${escapeHtml(tempLabel)}</strong>
+        <span class="buoy-marker-badge">${escapeHtml(changeLabel)}</span>
+        <span class="buoy-marker-label">
+          <b>${escapeHtml(station.id)}</b>
+          <small>${escapeHtml(stationShortName)}</small>
+        </span>
+      </span>
     </div>
   `;
 }
 
-function popupHtml(station) {
-  const temp = station.latest?.waterTempF;
-  const wave = station.latest?.waveHeightFt;
-  const distance = station.distanceFromVaNcLineMiles;
+function renderBuoySparkline(points = []) {
+  const samples = points
+    .filter((point) => Number.isFinite(point.waterTempF) && Number.isFinite(new Date(point.time).getTime()))
+    .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+  if (samples.length < 2) {
+    return `<div class="buoy-sparkline-empty">Not enough 7d history yet</div>`;
+  }
+
+  const width = 240;
+  const height = 66;
+  const pad = 8;
+  const values = samples.map((point) => point.waterTempF);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const spread = max - min || 1;
+  const startMs = new Date(samples[0].time).getTime();
+  const endMs = new Date(samples.at(-1).time).getTime();
+  const timeSpread = endMs - startMs || 1;
+  const coords = samples.map((point) => {
+    const x = pad + ((new Date(point.time).getTime() - startMs) / timeSpread) * (width - pad * 2);
+    const y = pad + (1 - (point.waterTempF - min) / spread) * (height - pad * 2);
+    return [x, y];
+  });
+  const line = coords.map(([x, y], index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`).join(" ");
+  const area = `${line} L ${coords.at(-1)[0].toFixed(2)} ${height - pad} L ${coords[0][0].toFixed(2)} ${height - pad} Z`;
+
   return `
-    <strong>${escapeHtml(station.id)} · ${escapeHtml(station.name)}</strong>
-    <span>${Number.isFinite(temp) ? `${oneDecimal(temp)} °F water` : "Water temp unavailable"}</span>
-    <span>${Number.isFinite(wave) ? `${oneDecimal(wave)} ft waves` : "Wave height unavailable"}</span>
-    <span>${ageLabel(station.latestAgeHours)} · ${Number.isFinite(distance) ? `${oneDecimal(distance)} mi from VA/NC line` : "distance unknown"}</span>
+    <svg class="buoy-sparkline" viewBox="0 0 ${width} ${height}" role="img" aria-label="7 day water temperature trend">
+      <path class="buoy-sparkline-area" d="${area}"></path>
+      <path class="buoy-sparkline-line" d="${line}"></path>
+    </svg>
   `;
 }
+
+function renderBuoyDetail(station) {
+  if (!els.buoyDetail) return;
+  if (!station) {
+    els.buoyDetail.innerHTML = `<div class="buoy-detail-empty">Select a buoy to see movement.</div>`;
+    return;
+  }
+
+  const temp = stationWaterTemp(station);
+  const change = stationChange24h(station);
+  const wave = station.latest?.waveHeightFt;
+  const period = station.latest?.dominantPeriodSec;
+  const direction = station.latest?.meanWaveDirectionText;
+  const range = station.trend?.range7dF;
+  const source = station.source || `https://www.ndbc.noaa.gov/station_page.php?station=${encodeURIComponent(station.id)}`;
+
+  els.buoyDetail.innerHTML = `
+    <div class="buoy-detail-top">
+      <div>
+        <p class="eyebrow">${escapeHtml(zoneLabel(station.zone))}</p>
+        <h3>${escapeHtml(station.id)} · ${escapeHtml(station.name)}</h3>
+        <span class="buoy-freshness ${station.isStale ? "stale" : "fresh"}">${escapeHtml(freshnessLabel(station))} · ${escapeHtml(stationDistanceLabel(station))}</span>
+      </div>
+      <a class="source-link" href="${escapeHtml(source)}" target="_blank" rel="noreferrer">NOAA</a>
+    </div>
+    <div class="buoy-detail-main">
+      <div>
+        <strong>${Number.isFinite(temp) ? `${oneDecimal(temp)}°` : "--"}</strong>
+        <span>water now</span>
+      </div>
+      <div class="${trendClass(change)}">
+        <strong>${escapeHtml(movementLabel(change))}</strong>
+        <span>24h movement</span>
+      </div>
+    </div>
+    <div class="buoy-detail-grid">
+      <div>
+        <span>7d range</span>
+        <strong>${range ? `${oneDecimal(range.min)}-${oneDecimal(range.max)} °F` : "--"}</strong>
+      </div>
+      <div>
+        <span>Waves</span>
+        <strong>${Number.isFinite(wave) ? `${oneDecimal(wave)} ft` : "--"}</strong>
+      </div>
+      <div>
+        <span>Period</span>
+        <strong>${Number.isFinite(period) ? `${zeroDecimal(period)} sec` : "--"}</strong>
+      </div>
+      <div>
+        <span>Direction</span>
+        <strong>${escapeHtml(direction || "--")}</strong>
+      </div>
+    </div>
+    <div class="buoy-sparkline-wrap">
+      ${renderBuoySparkline(station.trend?.series7d)}
+    </div>
+  `;
+}
+
+function renderBuoySummary(stations) {
+  const freshStations = stations.filter((station) => !station.isStale && Number.isFinite(stationWaterTemp(station)));
+  const movementStations = freshStations.filter((station) => Number.isFinite(stationChange24h(station)));
+  const warmest = [...freshStations].sort((a, b) => stationWaterTemp(b) - stationWaterTemp(a))[0];
+  const biggestRise = movementStations
+    .filter((station) => stationChange24h(station) > 0)
+    .sort((a, b) => stationChange24h(b) - stationChange24h(a))[0];
+  const biggestDrop = movementStations
+    .filter((station) => stationChange24h(station) < 0)
+    .sort((a, b) => stationChange24h(a) - stationChange24h(b))[0];
+
+  setText(els.buoyCount, zeroDecimal(freshStations.length));
+  setText(els.buoyWarmest, warmest ? `${oneDecimal(stationWaterTemp(warmest))}°` : "--");
+  setText(els.buoyRise, biggestRise ? trendBadgeLabel(stationChange24h(biggestRise)) : "--");
+  setText(els.buoyDrop, biggestDrop ? trendBadgeLabel(stationChange24h(biggestDrop)) : "--");
+
+  if (els.buoyWarmest) els.buoyWarmest.title = warmest ? `${warmest.id} · ${warmest.name}` : "";
+  if (els.buoyRise) els.buoyRise.title = biggestRise ? `${biggestRise.id} · ${biggestRise.name}` : "";
+  if (els.buoyDrop) els.buoyDrop.title = biggestDrop ? `${biggestDrop.id} · ${biggestDrop.name}` : "";
+}
+
 function renderLeafletBuoys(buoys, stations) {
   const map = ensureBuoyMap(buoys.reference);
   if (!map || !mapState.layer || !mapState.referenceLayer) return;
@@ -850,6 +1139,7 @@ function renderLeafletBuoys(buoys, stations) {
   mapState.referenceLayer.clearLayers();
   mapState.markers.clear();
   mapState.stations = new Map(stations.map((station) => [station.id, station]));
+  mapState.selectedStationId = chooseDefaultBuoy(stations);
 
   const reference = buoys.reference;
   if (reference?.lat && reference?.lon) {
@@ -890,45 +1180,50 @@ function renderLeafletBuoys(buoys, stations) {
     if (!Number.isFinite(station.lat) || !Number.isFinite(station.lon)) continue;
     bounds.push([station.lat, station.lon]);
 
-    const icon = window.L.divIcon({
-      className: "leaflet-div-icon",
-      html: markerHtml(station),
-      iconSize: [92, 58],
-      iconAnchor: [46, 58],
-      popupAnchor: [0, -54]
-    });
-
-    const marker = window.L.marker([station.lat, station.lon], { icon })
-      .bindPopup(popupHtml(station))
-      .on("click", () => selectBuoyStation(station.id, { pan: false }))
+    const marker = window.L.marker([station.lat, station.lon], {
+      icon: buoyStationIcon(station),
+      keyboard: true,
+      title: `${station.id} · ${station.name}`
+    })
+      .on("click", () => selectBuoyStation(station.id))
+      .on("mouseover", () => {
+        mapState.hoveredStationId = station.id;
+        updateBuoySelection();
+      })
+      .on("mouseout", () => {
+        if (mapState.hoveredStationId === station.id) {
+          mapState.hoveredStationId = null;
+          updateBuoySelection();
+        }
+      })
       .addTo(mapState.layer);
+    marker.setZIndexOffset(station.id === mapState.selectedStationId ? 1000 : station.isStale ? -100 : 0);
     mapState.markers.set(station.id, marker);
   }
 
   if (reference?.lat && reference?.lon) bounds.push([reference.lat, reference.lon]);
-  if (bounds.length) {
-    map.fitBounds(bounds, { padding: [34, 34], maxZoom: 8 });
-  }
+  mapState.bounds = bounds;
+  fitBuoyMapBounds();
 
-  setTimeout(() => map.invalidateSize(), 0);
+  setTimeout(fitBuoyMapBounds, 0);
+  renderBuoyDetail(mapState.stations.get(mapState.selectedStationId));
 }
 
 function updateBuoySelection() {
   for (const [stationId, marker] of mapState.markers) {
     const station = mapState.stations.get(stationId);
     if (!station) continue;
-    marker.setIcon(window.L.divIcon({
-      className: "leaflet-div-icon",
-      html: markerHtml(station),
-      iconSize: [92, 58],
-      iconAnchor: [46, 58],
-      popupAnchor: [0, -54]
-    }));
+    marker.setIcon(buoyStationIcon(station));
+    marker.setZIndexOffset(stationId === mapState.selectedStationId || stationId === mapState.hoveredStationId
+      ? 1000
+      : station.isStale ? -100 : 0);
   }
 
   els.buoyList?.querySelectorAll(".buoy-list-item").forEach((item) => {
     item.classList.toggle("selected", item.dataset.stationId === mapState.selectedStationId);
+    item.setAttribute("aria-pressed", item.dataset.stationId === mapState.selectedStationId ? "true" : "false");
   });
+  renderBuoyDetail(mapState.stations.get(mapState.selectedStationId));
 }
 
 function selectBuoyStation(stationId, options = {}) {
@@ -941,9 +1236,36 @@ function selectBuoyStation(stationId, options = {}) {
 
   const latLng = marker.getLatLng();
   if (options.pan !== false) {
-    mapState.map.flyTo(latLng, Math.max(mapState.map.getZoom(), 8), { duration: 0.55 });
+    mapState.map.flyTo(latLng, Math.max(mapState.map.getZoom(), 7.65), { duration: 0.45 });
   }
-  marker.openPopup();
+}
+
+function renderBuoyList(stations) {
+  if (!els.buoyList) return;
+  els.buoyList.innerHTML = stations.map((station) => {
+    const temp = stationWaterTemp(station);
+    const change = stationChange24h(station);
+    const wave = station.latest?.waveHeightFt;
+    const status = station.error
+      ? station.error
+      : `${freshnessLabel(station)} · ${Number.isFinite(wave) ? `${oneDecimal(wave)} ft waves` : zoneLabel(station.zone)}`;
+    return `
+      <button class="buoy-list-item ${station.isStale ? "stale" : ""} ${trendClass(change)}" type="button" data-station-id="${escapeHtml(station.id)}" aria-pressed="false" aria-label="Show ${escapeHtml(station.name)} on the buoy map">
+        <span class="buoy-chip-main">
+          <strong>${escapeHtml(station.id)} · ${escapeHtml(station.name)}</strong>
+          <span>${escapeHtml(status)}</span>
+        </span>
+        <span class="buoy-chip-values">
+          <strong class="buoy-temp">${Number.isFinite(temp) ? `${oneDecimal(temp)}°` : "--"}</strong>
+          <span class="buoy-movement">${escapeHtml(trendBadgeLabel(change))}</span>
+        </span>
+      </button>
+    `;
+  }).join("");
+  els.buoyList.querySelectorAll(".buoy-list-item").forEach((item) => {
+    item.addEventListener("click", () => selectBuoyStation(item.dataset.stationId));
+  });
+  updateBuoySelection();
 }
 
 function renderAlerts(errors) {
@@ -955,50 +1277,38 @@ function renderAlerts(errors) {
   els.alerts.innerHTML = messages.map((message) => `<div class="alert">${message}</div>`).join("");
 }
 
-function renderBuoyMap(buoys) {
+function chartRenderedWidth(svg) {
+  return svg?.clientWidth || svg?.parentElement?.clientWidth || window.innerWidth;
+}
+
+function chartRenderedAspect(svg, fallback = 16 / 9) {
+  const rect = svg?.getBoundingClientRect?.();
+  const width = rect?.width || svg?.clientWidth || svg?.parentElement?.clientWidth;
+  const height = rect?.height || svg?.clientHeight || svg?.parentElement?.clientHeight;
+  return Number.isFinite(width) && Number.isFinite(height) && height > 0
+    ? width / height
+    : fallback;
+}
+
+function renderBuoyMap(buoys, trends) {
   if (!buoys?.stations?.length) {
     setText(els.buoyCount, "--");
-    setText(els.buoyRange, "--");
+    setText(els.buoyWarmest, "--");
+    setText(els.buoyRise, "--");
+    setText(els.buoyDrop, "--");
     setText(els.buoyNote, "No NOAA buoy station data is available right now.");
     if (els.buoyList) els.buoyList.innerHTML = "";
+    renderBuoyDetail(null);
     if (mapState.layer) mapState.layer.clearLayers();
     return;
   }
 
-  const stations = buoys.stations;
-  setText(els.buoyCount, zeroDecimal(buoys.freshStationCount));
-  setText(els.buoyRange, buoys.temperatureRangeF
-    ? `${oneDecimal(buoys.temperatureRangeF.min)}-${oneDecimal(buoys.temperatureRangeF.max)}°`
-    : "--");
-  setText(els.buoyNote, "Markers are plotted from NDBC station coordinates. Faded markers are stale reports older than 24 hours.");
+  mapState.trends = new Map((trends?.stations || []).map((trend) => [trend.stationId, trend]));
+  const stations = sortBuoyStations(mergeBuoyTrends(buoys.stations, trends));
+  renderBuoySummary(stations);
+  setText(els.buoyNote, "Stale reports are muted and excluded from fresh movement summaries.");
   renderLeafletBuoys(buoys, stations);
-
-  if (els.buoyList) {
-    els.buoyList.innerHTML = stations.map((station) => {
-      const temp = station.latest?.waterTempF;
-      const wave = station.latest?.waveHeightFt;
-      const distance = station.distanceFromVaNcLineMiles;
-      const status = station.error
-        ? station.error
-        : `${ageLabel(station.latestAgeHours)} · ${Number.isFinite(distance) ? `${oneDecimal(distance)} mi from VA/NC line` : "distance unknown"}`;
-      return `
-        <button class="buoy-list-item" type="button" data-station-id="${escapeHtml(station.id)}" aria-label="Show ${escapeHtml(station.name)} on the buoy map">
-          <div>
-            <strong>${escapeHtml(station.id)} · ${escapeHtml(station.name)}</strong>
-            <span>${escapeHtml(status)}</span>
-          </div>
-          <div>
-            <strong class="buoy-temp">${Number.isFinite(temp) ? `${oneDecimal(temp)}°` : "--"}</strong>
-            <span>${Number.isFinite(wave) ? `${oneDecimal(wave)} ft waves` : station.zone}</span>
-          </div>
-        </button>
-      `;
-    }).join("");
-    els.buoyList.querySelectorAll(".buoy-list-item").forEach((item) => {
-      item.addEventListener("click", () => selectBuoyStation(item.dataset.stationId));
-    });
-    updateBuoySelection();
-  }
+  renderBuoyList(stations);
 }
 
 function renderTide(tide) {
@@ -1059,17 +1369,19 @@ function renderTideChart(svg, tide) {
   }
 
   const now = Date.now();
+  const compactTide = chartRenderedWidth(svg) < 430;
+  const visibleTideCount = compactTide ? 4 : 5;
   const nextIndex = uniquePredictions.findIndex((point) => new Date(point.time).getTime() > now);
-  const startIndex = nextIndex === -1 ? Math.max(0, uniquePredictions.length - 5) : Math.max(0, nextIndex - 1);
-  const visible = uniquePredictions.slice(startIndex, startIndex + 5);
+  const startIndex = nextIndex === -1 ? Math.max(0, uniquePredictions.length - visibleTideCount) : Math.max(0, nextIndex - 1);
+  const visible = uniquePredictions.slice(startIndex, startIndex + visibleTideCount);
   if (visible.length < 2) {
     svg.innerHTML = "";
     return;
   }
 
-  const width = 520;
   const height = 150;
-  const padX = 34;
+  const width = Math.round(height * chartRenderedAspect(svg, 520 / height));
+  const padX = compactTide ? 30 : 34;
   const padTop = 18;
   const padBottom = 30;
   const usableW = width - padX * 2;
@@ -1120,10 +1432,13 @@ function renderTideChart(svg, tide) {
       const y = yForValue(point.valueFt);
       const isHigh = point.type === "High";
       const labelY = isHigh ? Math.max(13, y - 12) : Math.min(height - 10, y + 22);
+      const tideLabel = compactTide
+        ? `${isHigh ? "H" : "L"} ${oneDecimal(point.valueFt)}`
+        : `${isHigh ? "High" : "Low"} ${oneDecimal(point.valueFt)} ft`;
       return `
         <line class="tide-chart-marker" x1="${x.toFixed(2)}" x2="${x.toFixed(2)}" y1="${padTop}" y2="${baselineY}"></line>
         <circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="6" class="tide-chart-dot ${isHigh ? "high" : "low"}"></circle>
-        <text class="tide-chart-label" x="${x.toFixed(2)}" y="${labelY.toFixed(2)}" text-anchor="middle">${isHigh ? "High" : "Low"} ${oneDecimal(point.valueFt)} ft</text>
+        <text class="tide-chart-label" x="${x.toFixed(2)}" y="${labelY.toFixed(2)}" text-anchor="middle">${tideLabel}</text>
         <text class="tide-chart-time" x="${x.toFixed(2)}" y="${height - 8}" text-anchor="middle">${escapeHtml(hourLabel(point.time))}</text>
       `;
     }).join("")}
@@ -1232,7 +1547,7 @@ function render(data) {
   }
 
   renderTide(tide);
-  renderBuoyMap(buoys);
+  renderBuoyMap(buoys, data.buoyTrends);
 }
 
 function bindChartControls(group, stateKey) {
@@ -1266,6 +1581,7 @@ els.sourcesClose?.addEventListener("click", closeSourcesDialog);
 els.sourcesDialog?.addEventListener("click", (event) => {
   if (event.target === els.sourcesDialog) closeSourcesDialog();
 });
+window.addEventListener("resize", scheduleBuoyMapResize);
 
 function initializeTheme() {
   themePreference = readThemePreference();
@@ -1292,6 +1608,7 @@ async function load() {
     const response = await fetch("/api/snapshot", { headers: { accept: "application/json" } });
     if (!response.ok) throw new Error(`Dashboard API returned ${response.status}`);
     const snapshot = await response.json();
+    snapshot.buoyTrends = await fetchBuoyTrends();
     writeStoredSnapshot(snapshot);
     chartState.usingStoredSnapshot = false;
     chartState.refreshError = null;
