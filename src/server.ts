@@ -1,9 +1,9 @@
-import { getBuoyTrends, getCachedSnapshot, getDatabaseStats, getHistory, normalizeHistoryLimit, persistSnapshot } from "./db";
+import { getBuoyTrends, getCachedSnapshot, getDatabaseStats, getHistory, getLatestSnapshot, normalizeHistoryLimit, persistSnapshot } from "./db";
 import { stat } from "node:fs/promises";
 
 const PORT = Number(Bun.env.PORT || 3000);
 const USER_AGENT = "obx-conditions/0.1 contact: local-dashboard";
-const SNAPSHOT_CACHE_MS = 2 * 60 * 1000;
+const SNAPSHOT_CACHE_MS = 15 * 60 * 1000;
 const WEATHERSTEM_STATION = "ccemcarovabeach@currituck.weatherstem.com";
 const CAROVA_BEACH_REFERENCE = {
   name: "Carova Beach oceanfront",
@@ -669,7 +669,14 @@ async function getLiveSnapshot() {
   };
 }
 
-function withCacheMetadata(snapshot: any, cacheStatus: "fresh" | "cached") {
+function startSnapshotRefresh() {
+  snapshotRefresh ??= getLiveSnapshot().finally(() => {
+    snapshotRefresh = undefined;
+  });
+  return snapshotRefresh;
+}
+
+function withCacheMetadata(snapshot: any, cacheStatus: "fresh" | "cached" | "refreshing") {
   const generatedAtMs = new Date(snapshot.generatedAt).getTime();
   const ageSeconds = Number.isFinite(generatedAtMs)
     ? Math.max(0, Math.round((Date.now() - generatedAtMs) / 1000))
@@ -691,15 +698,19 @@ async function getSnapshot() {
   const cached = getCachedSnapshot(SNAPSHOT_CACHE_MS);
   if (cached) return withCacheMetadata(cached, "cached");
 
-  snapshotRefresh ??= getLiveSnapshot().finally(() => {
-    snapshotRefresh = undefined;
-  });
+  const latest = getLatestSnapshot();
+  if (latest) {
+    startSnapshotRefresh().catch((error) => {
+      console.error("Background snapshot refresh failed", error);
+    });
+    return withCacheMetadata(latest, "refreshing");
+  }
 
-  return withCacheMetadata(await snapshotRefresh, "fresh");
+  return withCacheMetadata(await startSnapshotRefresh(), "fresh");
 }
 
 if (Bun.argv.includes("--once")) {
-  const snapshot = await getSnapshot();
+  const snapshot = withCacheMetadata(await startSnapshotRefresh(), "fresh");
   console.log(JSON.stringify({
     ok: true,
     generatedAt: snapshot.generatedAt,
@@ -721,7 +732,7 @@ Bun.serve({
     if (url.pathname === "/api/snapshot") {
       try {
         return json(await getSnapshot(), 200, {
-          "cache-control": "private, max-age=120, stale-while-revalidate=300"
+          "cache-control": "private, max-age=900, stale-while-revalidate=300"
         });
       } catch (error) {
         return json({ error: error instanceof Error ? error.message : "Unknown server error" }, 500);

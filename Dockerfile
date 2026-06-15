@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.13 AS build
+FROM oven/bun:1.3.14 AS build
 WORKDIR /app
 
 COPY package.json ./
@@ -7,7 +7,7 @@ COPY public ./public
 
 RUN bun build ./src/server.ts --target bun --outfile ./dist/server.js
 
-FROM oven/bun:1.3.13-alpine AS runtime
+FROM oven/bun:1.3.14-alpine AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production

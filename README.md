@@ -12,7 +12,7 @@ The current app is intentionally small: a Bun server, static frontend assets, li
 - **Carova Atlantic tide guidance** from NOAA CO-OPS high/low predictions at Sandbridge, VA, the closest NOAA tide-prediction station found for the VA/NC line.
 - **Carova Beach Fire Department weather and short forecast** using the Currituck WeatherSTEM public portal for station temperature and NWS fallback data for forecast/observation fields.
 - **Local history** persisted to SQLite so repeated live fetches build a local dataset over time.
-- **Two-minute source caching** so dashboard refreshes read the latest SQLite snapshot until the external feeds are due for another pull.
+- **Fifteen-minute source caching** so dashboard refreshes read the latest SQLite snapshot until the external feeds are due for another pull.
 
 ## Tech Stack
 
@@ -147,7 +147,7 @@ When `WEATHERSTEM_API_KEY` is not set, the app still works by using public Weath
 
 Fetches live data, persists it to SQLite, and returns the current dashboard payload.
 
-This endpoint returns the latest SQLite snapshot when it is less than two minutes old. When the cached snapshot is older than two minutes, the server refreshes the external sources, persists the new data, and returns that fresh snapshot. Full source histories are used for persistence but omitted from the response.
+This endpoint returns the latest SQLite snapshot when it is less than fifteen minutes old. When the persisted snapshot is older than fifteen minutes, the server returns that latest-known snapshot immediately with `cache.status: "refreshing"` and starts one shared background refresh. Cold starts with no stored snapshot still wait for the first live aggregation. Full source histories are used for persistence but omitted from the response.
 
 ### `GET /api/history`
 
@@ -244,7 +244,7 @@ bun -e "import { getDatabaseStats } from './src/db.ts'; console.log(JSON.stringi
 
 The frontend is deliberately framework-free:
 
-- `public/app.js` polls `/api/snapshot` every 2 minutes.
+- `public/app.js` polls `/api/snapshot` every 15 minutes.
 - Sparkline charts are rendered as inline SVG paths.
 - The Surf tile can toggle the Duck FRF chart between wave height and water temperature while keeping the same 1, 7, and 30 day windows.
 - The buoy map uses Leaflet with OpenStreetMap tiles, station-coordinate markers, popups, and a one-mile VA/NC-line reference circle.
@@ -275,4 +275,4 @@ If the UI grows, likely next steps are:
 - The map uses OpenStreetMap tiles from `tile.openstreetmap.org` and Leaflet assets from `unpkg.com`; if those browser-side assets are unavailable, the station list still renders.
 - NOAA stations may report `MM` for missing values; parsers convert those to empty fields.
 - `44100` often has older data; it is retained because it is useful when reporting, but stale state is shown.
-- `/api/snapshot` serves the newest SQLite snapshot for two minutes before refreshing external sources.
+- `/api/snapshot` serves the newest SQLite snapshot for fifteen minutes before refreshing external sources.

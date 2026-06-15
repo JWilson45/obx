@@ -649,20 +649,26 @@ export function persistSnapshot(snapshot: Snapshot) {
 }
 
 export function getCachedSnapshot(maxAgeMs: number) {
+  const snapshot = getLatestSnapshot();
+  if (!snapshot?.generatedAt) return undefined;
+
+  const generatedAtMs = new Date(snapshot.generatedAt).getTime();
+  if (!Number.isFinite(generatedAtMs) || Date.now() - generatedAtMs > maxAgeMs) return undefined;
+
+  return snapshot;
+}
+
+export function getLatestSnapshot() {
   const db = getDb();
   const row = db.query(`
-    SELECT generated_at AS generatedAt, snapshot_json AS snapshotJson
+    SELECT snapshot_json AS snapshotJson
     FROM snapshots
     WHERE snapshot_json IS NOT NULL
     ORDER BY generated_at DESC
     LIMIT 1
-  `).get() as { generatedAt: string; snapshotJson: string } | null;
+  `).get() as { snapshotJson: string } | null;
 
   if (!row?.snapshotJson) return undefined;
-
-  const generatedAtMs = new Date(row.generatedAt).getTime();
-  if (!Number.isFinite(generatedAtMs) || Date.now() - generatedAtMs > maxAgeMs) return undefined;
-
   return JSON.parse(row.snapshotJson) as Snapshot;
 }
 

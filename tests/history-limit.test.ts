@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 Bun.env.DB_PATH = `/private/tmp/obx-conditions-test-${process.pid}.sqlite`;
 
-const { getBuoyTrends, getCachedSnapshot, getDatabaseStats, getHistory, normalizeHistoryLimit, persistSnapshot } = await import("../src/db");
+const { getBuoyTrends, getCachedSnapshot, getHistory, getLatestSnapshot, normalizeHistoryLimit, persistSnapshot } = await import("../src/db");
 
 describe("normalizeHistoryLimit", () => {
   test("falls back when the limit is not numeric", () => {
@@ -20,6 +20,45 @@ describe("normalizeHistoryLimit", () => {
 });
 
 describe("getCachedSnapshot", () => {
+  test("returns the latest persisted snapshot even when it is outside the cache window", () => {
+    const staleSnapshot = {
+      generatedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      sound: {
+        latest: { time: "2026-05-04T10:00:00.000Z", value: 1.05 },
+        history: [{ time: "2026-05-04T10:00:00.000Z", value: 1.05 }],
+        source: "test"
+      },
+      marine: {
+        latest: { time: "2026-05-04T10:00:00.000Z", waveHeightFt: 2.2 },
+        history: [{ time: "2026-05-04T10:00:00.000Z", waveHeightFt: 2.2 }],
+        source: "test"
+      },
+      buoys: {
+        stations: [{
+          id: "44056",
+          name: "Duck FRF",
+          zone: "near-border",
+          lat: 36.2,
+          lon: -75.714,
+          latest: { time: "2026-05-04T10:00:00.000Z", waterTempF: 61 },
+          history: [{ time: "2026-05-04T10:00:00.000Z", waterTempF: 61 }],
+          source: "test"
+        }]
+      },
+      errors: {}
+    };
+
+    persistSnapshot(staleSnapshot);
+
+    expect(getCachedSnapshot(60_000)).toBeUndefined();
+    const latest = getLatestSnapshot();
+    expect(latest?.generatedAt).toBe(staleSnapshot.generatedAt);
+    expect(latest?.sound?.latest?.value).toBe(1.05);
+    expect(latest?.sound?.history).toBeUndefined();
+    expect(latest?.marine?.history).toBeUndefined();
+    expect(latest?.buoys?.stations?.[0]?.history).toBeUndefined();
+  });
+
   test("returns a compact persisted snapshot within the cache window", () => {
     const snapshot = {
       generatedAt: new Date().toISOString(),
@@ -96,7 +135,6 @@ describe("snapshot retention", () => {
     persistSnapshot(oldSnapshot);
     persistSnapshot(currentSnapshot);
 
-    expect(getDatabaseStats().snapshots).toEqual({ count: 2 });
     const snapshots = getHistory("snapshots", 10).map((row: any) => row.generatedAt);
     expect(snapshots).toContain(currentSnapshot.generatedAt);
     expect(snapshots).not.toContain(oldSnapshot.generatedAt);

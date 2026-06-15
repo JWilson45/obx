@@ -74,7 +74,8 @@ const mapState = {
   selectedStationId: null,
   hoveredStationId: null,
   bounds: null,
-  resizeTimer: null
+  resizeTimer: null,
+  selectionEventsBound: false
 };
 
 const chartState = {
@@ -84,7 +85,10 @@ const chartState = {
   forecastMode: "hourly",
   data: null,
   usingStoredSnapshot: false,
-  refreshError: null
+  refreshError: null,
+  snapshotPollTimer: null,
+  snapshotLoad: null,
+  buoyTrendRequestId: 0
 };
 
 const THEME_STORAGE_KEY = "obx-conditions:theme:v1";
@@ -110,6 +114,9 @@ const MAP_TILE_THEMES = {
 
 const SNAPSHOT_STORAGE_KEY = "obx-conditions:snapshot:v1";
 const STALE_SNAPSHOT_MS = 30 * 60 * 1000;
+const SNAPSHOT_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+const SNAPSHOT_REFRESH_POLL_MS = 5 * 1000;
+const SNAPSHOT_REFRESH_TIMEOUT_MS = 60 * 1000;
 const themeMediaQuery = window.matchMedia(THEME_QUERY);
 let themePreference = "system";
 
@@ -353,19 +360,39 @@ function updateCacheStatus() {
   const isStale = ageMs >= STALE_SNAPSHOT_MS;
   const errors = data.errors || {};
   const hasErrors = Object.keys(errors).length > 0;
-  const cacheLabel = chartState.usingStoredSnapshot || data.cache?.status === "cached" ? "cached" : "fresh";
+  const cacheStatus = data.cache?.status;
+  const isRefreshing = cacheStatus === "refreshing" && !chartState.refreshError;
+  const cacheLabel = chartState.usingStoredSnapshot
+    ? "saved browser copy"
+    : cacheStatus === "refreshing"
+      ? "server copy, refreshing"
+      : cacheStatus === "cached"
+        ? "server cache"
+        : cacheStatus === "fresh"
+          ? "fresh"
+          : "loaded";
 
-  els.statusDot?.classList.toggle("ok", !isStale && !hasErrors && !chartState.refreshError);
+  els.statusDot?.classList.toggle("ok", !isStale && !hasErrors && !chartState.refreshError && !isRefreshing);
   els.statusDot?.classList.toggle("stale", isStale);
 
-  setText(els.status, isStale
-    ? "Data stale"
-    : chartState.refreshError
-      ? "Showing cached data"
-      : hasErrors
-        ? "Partial live data"
-        : "All live feeds loaded");
-  setText(els.lastUpdated, `Updated ${fmt.format(generatedAt)} · ${cacheLabel} · ${ageLabelFromMs(ageMs)}`);
+  const status = chartState.refreshError
+    ? chartState.usingStoredSnapshot ? "Showing saved data" : "Refresh failed"
+    : chartState.usingStoredSnapshot
+      ? isStale ? "Saved data stale" : "Showing saved data"
+      : isRefreshing
+        ? isStale ? "Refreshing stale data" : "Refreshing live feeds"
+        : isStale
+          ? "Data stale"
+          : hasErrors
+            ? "Partial live data"
+            : cacheStatus === "cached"
+              ? "Server cache current"
+              : cacheStatus === "fresh"
+                ? "Fresh live data"
+                : "Data loaded";
+  const refreshDetail = chartState.refreshError ? ` · ${chartState.refreshError}` : "";
+  setText(els.status, status);
+  setText(els.lastUpdated, `Updated ${fmt.format(generatedAt)} · ${cacheLabel} · ${ageLabelFromMs(ageMs)}${refreshDetail}`);
 }
 
 function readStoredSnapshot() {
@@ -387,12 +414,68 @@ function writeStoredSnapshot(snapshot) {
 
 async function fetchBuoyTrends() {
   try {
-    const response = await fetch("/api/buoy-trends", { headers: { accept: "application/json" } });
+    const response = await fetch("/api/buoy-trends", {
+      cache: "no-store",
+      headers: { accept: "application/json" }
+    });
     if (!response.ok) throw new Error(`Buoy trends returned ${response.status}`);
     return await response.json();
   } catch {
     return undefined;
   }
+}
+
+function clearSnapshotPoll() {
+  if (!chartState.snapshotPollTimer) return;
+  window.clearTimeout(chartState.snapshotPollTimer);
+  chartState.snapshotPollTimer = null;
+}
+
+function snapshotTimeMs(snapshot) {
+  const value = new Date(snapshot?.generatedAt).getTime();
+  return Number.isFinite(value) ? value : 0;
+}
+
+function scheduleSnapshotPoll(snapshot, previousGeneratedAt, deadline) {
+  if (previousGeneratedAt && snapshotTimeMs(snapshot) > snapshotTimeMs({ generatedAt: previousGeneratedAt })) {
+    clearSnapshotPoll();
+    return;
+  }
+
+  if (snapshot?.cache?.status !== "refreshing") {
+    clearSnapshotPoll();
+    return;
+  }
+
+  const pollDeadline = deadline || Date.now() + SNAPSHOT_REFRESH_TIMEOUT_MS;
+  if (Date.now() >= pollDeadline) {
+    clearSnapshotPoll();
+    chartState.refreshError = "Live refresh did not finish within 1 minute";
+    updateCacheStatus();
+    renderAlerts({ ...(chartState.data?.errors || {}), dashboard: chartState.refreshError });
+    return;
+  }
+
+  clearSnapshotPoll();
+  chartState.snapshotPollTimer = window.setTimeout(() => {
+    load({
+      pollUntilNewerThan: previousGeneratedAt || snapshot.generatedAt,
+      pollDeadline
+    });
+  }, SNAPSHOT_REFRESH_POLL_MS);
+}
+
+async function refreshBuoyTrends(snapshot = chartState.data) {
+  if (!snapshot?.buoys?.stations?.length) return;
+
+  const requestId = ++chartState.buoyTrendRequestId;
+  const trends = await fetchBuoyTrends();
+  if (!trends || requestId !== chartState.buoyTrendRequestId) return;
+  if (chartState.data?.generatedAt !== snapshot.generatedAt) return;
+
+  chartState.data.buoyTrends = trends;
+  renderBuoyMap(chartState.data.buoys, trends);
+  writeStoredSnapshot(chartState.data);
 }
 
 function escapeHtml(value) {
@@ -859,7 +942,23 @@ function ensureBuoyMap(reference) {
 
   mapState.layer = window.L.layerGroup().addTo(mapState.map);
   mapState.referenceLayer = window.L.layerGroup().addTo(mapState.map);
+  bindBuoyMapSelectionEvents();
   return mapState.map;
+}
+
+function bindBuoyMapSelectionEvents() {
+  if (!els.buoyMap || mapState.selectionEventsBound) return;
+  mapState.selectionEventsBound = true;
+
+  els.buoyMap.addEventListener("click", (event) => {
+    const marker = event.target.closest?.(".buoy-marker");
+    const stationId = marker?.dataset?.stationId;
+    if (!stationId) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    selectBuoyStation(stationId);
+  });
 }
 
 function fitBuoyMapBounds() {
@@ -983,8 +1082,8 @@ function buoyStationIcon(station) {
   return window.L.divIcon({
     className: "leaflet-div-icon buoy-leaflet-icon",
     html: markerHtml(station),
-    iconSize: [1, 1],
-    iconAnchor: [0, 0]
+    iconSize: [180, 150],
+    iconAnchor: [90, 75]
   });
 }
 
@@ -1002,7 +1101,7 @@ function markerHtml(station) {
       data-station-id="${escapeHtml(station.id)}"
       aria-label="${escapeHtml(`${station.id} ${station.name}: ${tempLabel} water, ${changeLabel} in 24 hours`)}"
       class="buoy-marker ${station.isStale ? "stale" : ""} ${isSelected ? "selected" : ""} ${isHovered ? "hovered" : ""} ${trendClass(change)}"
-      style="--buoy-temp-color:${tempColor(temp)}; --callout-x:${layout.x}px; --callout-y:${layout.y}px; --leader-width:${layout.leaderWidth.toFixed(1)}px; --leader-angle:${layout.leaderAngle.toFixed(1)}deg"
+      style="--buoy-temp-color:${tempColor(temp)}; --callout-x:${layout.x + 90}px; --callout-y:${layout.y + 75}px; --leader-width:${layout.leaderWidth.toFixed(1)}px; --leader-angle:${layout.leaderAngle.toFixed(1)}deg"
     >
       <span class="buoy-marker-leader" aria-hidden="true"></span>
       <span class="buoy-marker-pin" aria-hidden="true"></span>
@@ -1018,37 +1117,9 @@ function markerHtml(station) {
   `;
 }
 
-function renderBuoySparkline(points = []) {
-  const samples = points
-    .filter((point) => Number.isFinite(point.waterTempF) && Number.isFinite(new Date(point.time).getTime()))
-    .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
-  if (samples.length < 2) {
-    return `<div class="buoy-sparkline-empty">Not enough 7d history yet</div>`;
-  }
-
-  const width = 240;
-  const height = 66;
-  const pad = 8;
-  const values = samples.map((point) => point.waterTempF);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const spread = max - min || 1;
-  const startMs = new Date(samples[0].time).getTime();
-  const endMs = new Date(samples.at(-1).time).getTime();
-  const timeSpread = endMs - startMs || 1;
-  const coords = samples.map((point) => {
-    const x = pad + ((new Date(point.time).getTime() - startMs) / timeSpread) * (width - pad * 2);
-    const y = pad + (1 - (point.waterTempF - min) / spread) * (height - pad * 2);
-    return [x, y];
-  });
-  const line = coords.map(([x, y], index) => `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`).join(" ");
-  const area = `${line} L ${coords.at(-1)[0].toFixed(2)} ${height - pad} L ${coords[0][0].toFixed(2)} ${height - pad} Z`;
-
+function renderBuoySparkline() {
   return `
-    <svg class="buoy-sparkline" viewBox="0 0 ${width} ${height}" role="img" aria-label="7 day water temperature trend">
-      <path class="buoy-sparkline-area" d="${area}"></path>
-      <path class="buoy-sparkline-line" d="${line}"></path>
-    </svg>
+    <svg class="buoy-sparkline" role="img" aria-label="7 day water temperature trend"></svg>
   `;
 }
 
@@ -1105,9 +1176,20 @@ function renderBuoyDetail(station) {
       </div>
     </div>
     <div class="buoy-sparkline-wrap">
-      ${renderBuoySparkline(station.trend?.series7d)}
+      ${renderBuoySparkline()}
     </div>
   `;
+
+  renderSparkline(els.buoyDetail.querySelector(".buoy-sparkline"), station.trend?.series7d, "waterTempF", "°F", {
+    days: 7,
+    emptyLabel: "Not enough 7d history yet",
+    lineColor: "var(--highlight)",
+    fillColor: "color-mix(in srgb, var(--highlight) 16%, transparent)",
+    gridColor: "color-mix(in srgb, var(--ink) 18%, transparent)",
+    labelColor: "var(--muted)",
+    cursorBgColor: "var(--paper)",
+    cursorLabelColor: "var(--ink)"
+  });
 }
 
 function renderBuoySummary(stations) {
@@ -1596,40 +1678,55 @@ function initializeTheme() {
   setThemePreference(themePreference);
 }
 
-async function load() {
-  const storedSnapshot = readStoredSnapshot();
+async function loadSnapshot({ useStoredSnapshot = false, pollUntilNewerThan, pollDeadline } = {}) {
+  const storedSnapshot = useStoredSnapshot ? readStoredSnapshot() : null;
   if (storedSnapshot && !chartState.data) {
     chartState.usingStoredSnapshot = true;
     chartState.refreshError = null;
     render(storedSnapshot);
+    refreshBuoyTrends(storedSnapshot);
   }
 
   try {
-    const response = await fetch("/api/snapshot", { headers: { accept: "application/json" } });
+    const response = await fetch("/api/snapshot", {
+      cache: "no-store",
+      headers: { accept: "application/json" }
+    });
     if (!response.ok) throw new Error(`Dashboard API returned ${response.status}`);
     const snapshot = await response.json();
-    snapshot.buoyTrends = await fetchBuoyTrends();
     writeStoredSnapshot(snapshot);
     chartState.usingStoredSnapshot = false;
     chartState.refreshError = null;
     render(snapshot);
+    refreshBuoyTrends(snapshot);
+    scheduleSnapshotPoll(snapshot, pollUntilNewerThan, pollDeadline);
   } catch (error) {
-    if (!storedSnapshot) {
-      chartState.refreshError = error.message;
+    const message = error instanceof Error ? error.message : "Unable to load data";
+    clearSnapshotPoll();
+    chartState.refreshError = message;
+
+    if (!chartState.data) {
       setText(els.status, "Unable to load data");
-      setText(els.lastUpdated, error.message);
-      els.statusDot.classList.remove("ok");
-      els.statusDot.classList.remove("stale");
-      renderAlerts({ dashboard: error.message });
+      setText(els.lastUpdated, message);
+      els.statusDot?.classList.remove("ok");
+      els.statusDot?.classList.remove("stale");
+      renderAlerts({ dashboard: message });
     } else {
-      chartState.usingStoredSnapshot = true;
-      chartState.refreshError = error.message;
       updateCacheStatus();
-      renderAlerts({ dashboard: `Refresh failed: ${error.message}` });
+      renderAlerts({ ...(chartState.data.errors || {}), dashboard: `Refresh failed: ${message}` });
     }
   }
 }
 
+async function load(options) {
+  if (chartState.snapshotLoad) return chartState.snapshotLoad;
+  chartState.snapshotLoad = loadSnapshot(options).finally(() => {
+    chartState.snapshotLoad = null;
+  });
+  return chartState.snapshotLoad;
+}
+
 initializeTheme();
-load();
+load({ useStoredSnapshot: true });
 setInterval(updateCacheStatus, 1000);
+setInterval(() => load(), SNAPSHOT_REFRESH_INTERVAL_MS);

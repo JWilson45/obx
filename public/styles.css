@@ -1483,12 +1483,13 @@ body[data-theme='dark'] .buoy-map .leaflet-tile {
 
 .buoy-leaflet-icon {
   overflow: visible;
+  pointer-events: none;
 }
 
 .buoy-marker {
   position: relative;
-  width: 1px;
-  height: 1px;
+  width: 180px;
+  height: 150px;
   overflow: visible;
   color: #fffaf0;
   transition:
@@ -1498,8 +1499,8 @@ body[data-theme='dark'] .buoy-map .leaflet-tile {
 
 .buoy-marker-pin {
   position: absolute;
-  left: -6px;
-  top: -6px;
+  left: 84px;
+  top: 69px;
   z-index: 3;
   width: 12px;
   height: 12px;
@@ -1509,12 +1510,13 @@ body[data-theme='dark'] .buoy-map .leaflet-tile {
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--map-markup-border) 34%, transparent),
     0 8px 18px color-mix(in srgb, var(--ink) 24%, transparent);
+  pointer-events: auto;
 }
 
 .buoy-marker-leader {
   position: absolute;
-  left: 0;
-  top: 0;
+  left: 90px;
+  top: 75px;
   z-index: 1;
   width: var(--leader-width, 0);
   height: 2px;
@@ -1523,6 +1525,7 @@ body[data-theme='dark'] .buoy-map .leaflet-tile {
   opacity: 0.86;
   transform: rotate(var(--leader-angle, 0));
   transform-origin: left center;
+  pointer-events: none;
 }
 
 .buoy-marker-callout {
@@ -1544,6 +1547,8 @@ body[data-theme='dark'] .buoy-map .leaflet-tile {
   box-shadow:
     0 14px 28px color-mix(in srgb, var(--ink) 24%, transparent),
     inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  pointer-events: auto;
   text-align: center;
   transform: translate(-50%, -50%) scale(1);
   transform-origin: center;
@@ -1859,38 +1864,18 @@ body[data-theme='dark'] .buoy-map .leaflet-tile {
 }
 
 .buoy-sparkline-wrap {
-  min-height: 58px;
-  padding: 6px;
+  height: 132px;
+  min-height: 132px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--paper) 36%, transparent);
+  overflow: hidden;
 }
 
 .buoy-sparkline {
   display: block;
   width: 100%;
-  height: 48px;
-}
-
-.buoy-sparkline-area {
-  fill: color-mix(in srgb, var(--highlight) 20%, transparent);
-}
-
-.buoy-sparkline-line {
-  fill: none;
-  stroke: var(--highlight);
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 4;
-}
-
-.buoy-sparkline-empty {
-  display: grid;
-  min-height: 46px;
-  place-items: center;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 800;
+  height: 100%;
 }
 
 .buoy-list {
