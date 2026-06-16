@@ -6,7 +6,9 @@
     <title>OBX Conditions</title>
     <link rel="icon" type="image/png" href="/favicon-32.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
+    <link rel="stylesheet" href="/vendor/leaflet/MarkerCluster.css" />
+    <link rel="stylesheet" href="/vendor/leaflet/MarkerCluster.Default.css" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -296,12 +298,16 @@
             </div>
             <a class="source-link" href="https://www.corollalightresort.com/surf-cam" target="_blank" rel="noreferrer">Vista Webcams</a>
           </div>
-          <div class="webcam-player-wrap">
+          <div class="webcam-player-wrap" id="webcam-player-wrap">
+            <div class="webcam-player-placeholder" id="webcam-placeholder">
+              <p>The live surf cam loads on demand so third-party stream errors stay out of the main dashboard console.</p>
+              <button type="button" id="webcam-load">Load live cam</button>
+            </div>
             <iframe
               class="webcam-player"
-              src="https://my.vistawebcams.com/embed/2O09J4QSEV"
+              id="webcam-player"
+              data-src="https://my.vistawebcams.com/embed/2O09J4QSEV"
               title="Live Corolla Light Resort surf cam"
-              loading="lazy"
               allow="autoplay; fullscreen; picture-in-picture"
               allowfullscreen
             ></iframe>
@@ -359,7 +365,8 @@
       </div>
     </dialog>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/vendor/leaflet/leaflet.js"></script>
+    <script src="/vendor/leaflet/leaflet.markercluster.js"></script>
     <script src="/app.js" type="module"></script>
   </body>
 </html>

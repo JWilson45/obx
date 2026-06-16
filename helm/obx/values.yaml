@@ -27,6 +27,9 @@ container:
     NODE_ENV: production
     PORT: "3000"
     DB_PATH: /data/obx.sqlite
+    SERVICE_NAME: obx-conditions
+    LOG_LEVEL: info
+    LOG_FORMAT: json
   envFromSecret:
     enabled: false
     name: ""
@@ -55,7 +58,9 @@ ingress:
 resources: {}
 
 podAnnotations: {}
-podLabels: {}
+podLabels:
+  app.kubernetes.io/component: api
+  logging: loki
 
 podSecurityContext:
   runAsNonRoot: true

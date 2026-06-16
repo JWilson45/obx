@@ -1,3 +1,5 @@
+import { BuoyMap } from "./buoy-map.js";
+
 const els = {
   statusDot: document.querySelector("#system-status-dot"),
   status: document.querySelector("#system-status"),
@@ -60,22 +62,17 @@ const els = {
   themeStatus: document.querySelector("#theme-status"),
   sourcesOpen: document.querySelector("#sources-open"),
   sourcesClose: document.querySelector("#sources-close"),
-  sourcesDialog: document.querySelector("#sources-dialog")
+  sourcesDialog: document.querySelector("#sources-dialog"),
+  webcamWrap: document.querySelector("#webcam-player-wrap"),
+  webcamPlayer: document.querySelector("#webcam-player"),
+  webcamLoad: document.querySelector("#webcam-load")
 };
 
-const mapState = {
+const buoyUiState = {
   map: null,
-  layer: null,
-  referenceLayer: null,
-  baseLayer: null,
-  markers: new Map(),
   stations: new Map(),
   trends: new Map(),
-  selectedStationId: null,
-  hoveredStationId: null,
-  bounds: null,
-  resizeTimer: null,
-  selectionEventsBound: false
+  selectedStationId: null
 };
 
 const chartState = {
@@ -94,26 +91,10 @@ const chartState = {
 const THEME_STORAGE_KEY = "obx-conditions:theme:v1";
 const THEME_QUERY = "(prefers-color-scheme: dark)";
 
-const MAP_TILE_THEMES = {
-  light: {
-    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-    options: {
-      maxZoom: 18,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }
-  },
-  dark: {
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    options: {
-      maxZoom: 18,
-      subdomains: ["a", "b", "c", "d"],
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-    }
-  }
-};
-
 const SNAPSHOT_STORAGE_KEY = "obx-conditions:snapshot:v1";
 const STALE_SNAPSHOT_MS = 30 * 60 * 1000;
+const SNAPSHOT_FETCH_TIMEOUT_MS = 30 * 1000;
+const SNAPSHOT_INITIAL_FETCH_TIMEOUT_MS = 90 * 1000;
 const SNAPSHOT_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 const SNAPSHOT_REFRESH_POLL_MS = 5 * 1000;
 const SNAPSHOT_REFRESH_TIMEOUT_MS = 60 * 1000;
@@ -261,24 +242,23 @@ function getThemePalette(theme = getResolvedTheme()) {
   };
 }
 
-function getBuoyTileConfig(theme = getResolvedTheme()) {
-  return MAP_TILE_THEMES[theme] ?? MAP_TILE_THEMES.light;
-}
-
-function createBuoyTileLayer(theme = getResolvedTheme()) {
-  if (!window.L) return null;
-  const config = getBuoyTileConfig(theme);
-  return window.L.tileLayer(config.url, config.options);
-}
-
-function applyBuoyTileTheme(theme = getResolvedTheme()) {
-  if (!mapState.map || !window.L || !mapState.baseLayer) return;
-  if (mapState.baseLayer instanceof Object && mapState.baseLayer._obxTheme === theme) return;
-  const nextLayer = createBuoyTileLayer(theme);
-  if (!nextLayer) return;
-  mapState.baseLayer.remove();
-  nextLayer._obxTheme = theme;
-  mapState.baseLayer = nextLayer.addTo(mapState.map);
+function getBuoyMap() {
+  if (!els.buoyMap) return null;
+  if (!buoyUiState.map) {
+    buoyUiState.map = new BuoyMap(els.buoyMap, {
+      onSelect: onBuoyMapSelect,
+      formatters: {
+        escapeHtml,
+        tempColor,
+        trendClass,
+        trendBadgeLabel,
+        oneDecimal,
+        stationWaterTemp,
+        stationChange24h
+      }
+    });
+  }
+  return buoyUiState.map;
 }
 
 function setThemePreference(nextPreference, { persist = false, rerender = true } = {}) {
@@ -299,7 +279,7 @@ function setThemePreference(nextPreference, { persist = false, rerender = true }
 
   if (els.themeStatus) setText(els.themeStatus, statusLabel);
 
-  applyBuoyTileTheme(resolvedTheme);
+  getBuoyMap()?.setTheme(resolvedTheme);
 
   if (rerender && chartState.data) {
     renderTopCharts();
@@ -395,10 +375,24 @@ function updateCacheStatus() {
   setText(els.lastUpdated, `Updated ${fmt.format(generatedAt)} · ${cacheLabel} · ${ageLabelFromMs(ageMs)}${refreshDetail}`);
 }
 
+function snapshotAgeMs(snapshot) {
+  const generatedAtMs = new Date(snapshot?.generatedAt).getTime();
+  return Number.isFinite(generatedAtMs) ? Math.max(0, Date.now() - generatedAtMs) : Infinity;
+}
+
+function isStoredSnapshotUsable(snapshot) {
+  return Boolean(snapshot?.generatedAt) && snapshotAgeMs(snapshot) < STALE_SNAPSHOT_MS;
+}
+
 function readStoredSnapshot() {
   try {
     const snapshot = JSON.parse(localStorage.getItem(SNAPSHOT_STORAGE_KEY) || "null");
-    return snapshot && snapshot.generatedAt ? snapshot : null;
+    if (!snapshot?.generatedAt) return null;
+    if (!isStoredSnapshotUsable(snapshot)) {
+      localStorage.removeItem(SNAPSHOT_STORAGE_KEY);
+      return null;
+    }
+    return snapshot;
   } catch {
     return null;
   }
@@ -409,6 +403,43 @@ function writeStoredSnapshot(snapshot) {
     localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
   } catch {
     // Storage can be unavailable in private browsing or constrained devices.
+  }
+}
+
+async function fetchSnapshotWithTimeout({ initialLoad = false } = {}) {
+  const timeoutMs = initialLoad ? SNAPSHOT_INITIAL_FETCH_TIMEOUT_MS : SNAPSHOT_FETCH_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch("/api/snapshot", {
+      cache: "no-store",
+      signal: controller.signal,
+      headers: { accept: "application/json" }
+    });
+    if (!response.ok) throw new Error(`Dashboard API returned ${response.status}`);
+    return await response.json();
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Dashboard API timed out after ${Math.round(timeoutMs / 1000)} seconds`);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+function safeRender(snapshot) {
+  try {
+    render(snapshot);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Dashboard render failed";
+    console.error("Dashboard render failed", error);
+    chartState.refreshError = message;
+    renderAlerts({
+      ...(snapshot?.errors || {}),
+      dashboard: message
+    });
   }
 }
 
@@ -909,85 +940,6 @@ function bindChartCursor(svg, points, coords, key, unit, layout) {
   hitArea.addEventListener("pointerleave", () => cursor.setAttribute("opacity", "0"));
 }
 
-function ensureBuoyMap(reference) {
-  if (!els.buoyMap) return null;
-
-  if (!window.L) {
-    els.buoyMap.innerHTML = `
-      <div class="map-fallback">
-        <div>
-          <strong>Map tiles unavailable</strong>
-          <span>The buoy list still shows live station temperatures.</span>
-        </div>
-      </div>
-    `;
-    return null;
-  }
-
-  if (mapState.map) return mapState.map;
-  const selectedTheme = getResolvedTheme();
-
-  mapState.map = window.L.map(els.buoyMap, {
-    scrollWheelZoom: false,
-    zoomControl: true,
-    zoomSnap: 0.25,
-    zoomDelta: 0.25
-  }).setView([reference?.lat ?? 36.55, reference?.lon ?? -75.87], 8);
-
-  const tileLayer = createBuoyTileLayer(selectedTheme);
-  if (tileLayer) {
-    tileLayer._obxTheme = selectedTheme;
-    mapState.baseLayer = tileLayer.addTo(mapState.map);
-  }
-
-  mapState.layer = window.L.layerGroup().addTo(mapState.map);
-  mapState.referenceLayer = window.L.layerGroup().addTo(mapState.map);
-  bindBuoyMapSelectionEvents();
-  return mapState.map;
-}
-
-function bindBuoyMapSelectionEvents() {
-  if (!els.buoyMap || mapState.selectionEventsBound) return;
-  mapState.selectionEventsBound = true;
-
-  els.buoyMap.addEventListener("click", (event) => {
-    const marker = event.target.closest?.(".buoy-marker");
-    const stationId = marker?.dataset?.stationId;
-    if (!stationId) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    selectBuoyStation(stationId);
-  });
-}
-
-function fitBuoyMapBounds() {
-  if (!mapState.map || !mapState.bounds?.length) return;
-  const compactMap = els.buoyMap?.clientWidth < 520;
-  const bounds = window.L.latLngBounds(mapState.bounds).pad(compactMap ? 0.26 : 0.1);
-  mapState.map.invalidateSize();
-  mapState.map.fitBounds(bounds, {
-    animate: false,
-    padding: compactMap ? [80, 72] : [84, 84],
-    maxZoom: compactMap ? 6.35 : 7.65
-  });
-}
-
-function scheduleBuoyMapResize() {
-  if (!mapState.map) return;
-  window.clearTimeout(mapState.resizeTimer);
-  mapState.resizeTimer = window.setTimeout(fitBuoyMapBounds, 120);
-}
-
-function pointOffsetMiles(point, eastMiles = 0, northMiles = 0) {
-  const lat = Number(point?.lat);
-  const lon = Number(point?.lon);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return undefined;
-  const milesPerDegreeLat = 69;
-  const milesPerDegreeLon = Math.max(1, 69 * Math.cos(lat * Math.PI / 180));
-  return [lat + northMiles / milesPerDegreeLat, lon + eastMiles / milesPerDegreeLon];
-}
-
 function stationWaterTemp(station) {
   return Number.isFinite(station.latest?.waterTempF)
     ? station.latest.waterTempF
@@ -1037,84 +989,13 @@ function sortBuoyStations(stations) {
   });
 }
 
-function chooseDefaultBuoy(stations) {
-  const current = stations.find((station) => station.id === mapState.selectedStationId);
+function chooseDefaultBuoy(stations, selectedStationId = null) {
+  const current = stations.find((station) => station.id === selectedStationId);
   if (current) return current.id;
   return stations.find((station) => !station.isStale && Number.isFinite(stationChange24h(station)))?.id
     || stations.find((station) => !station.isStale)?.id
     || stations[0]?.id
     || null;
-}
-
-function stationCalloutLayout(station) {
-  const compactMap = (els.buoyMap?.clientWidth || window.innerWidth) < 520;
-  const offsets = compactMap ? {
-    "44056": [58, 82],
-    "44100": [-80, -70],
-    "44099": [-96, -82],
-    "44014": [78, -78],
-    "44086": [-102, 76],
-    "44079": [70, 28],
-    "41082": [84, 104],
-    "41083": [-86, 104]
-  } : {
-    "44056": [62, 22],
-    "44100": [-70, -42],
-    "44099": [-42, -48],
-    "44014": [92, -50],
-    "44086": [-118, 80],
-    "44079": [105, 10],
-    "41082": [104, 86],
-    "41083": [-68, 86]
-  };
-  const [x, y] = offsets[station.id] || [0, 0];
-  const distance = Math.hypot(x, y);
-  const calloutRadius = compactMap ? 28 : 42;
-  return {
-    x,
-    y,
-    leaderWidth: Math.max(0, distance - calloutRadius),
-    leaderAngle: Math.atan2(y, x) * 180 / Math.PI
-  };
-}
-
-function buoyStationIcon(station) {
-  return window.L.divIcon({
-    className: "leaflet-div-icon buoy-leaflet-icon",
-    html: markerHtml(station),
-    iconSize: [180, 150],
-    iconAnchor: [90, 75]
-  });
-}
-
-function markerHtml(station) {
-  const temp = stationWaterTemp(station);
-  const change = stationChange24h(station);
-  const isSelected = mapState.selectedStationId === station.id;
-  const isHovered = mapState.hoveredStationId === station.id;
-  const layout = stationCalloutLayout(station);
-  const stationShortName = station.name?.replace(/,?\s*(VA|NC)$/i, "") || station.id;
-  const tempLabel = Number.isFinite(temp) ? `${oneDecimal(temp)}°` : "--";
-  const changeLabel = trendBadgeLabel(change);
-  return `
-    <div
-      data-station-id="${escapeHtml(station.id)}"
-      aria-label="${escapeHtml(`${station.id} ${station.name}: ${tempLabel} water, ${changeLabel} in 24 hours`)}"
-      class="buoy-marker ${station.isStale ? "stale" : ""} ${isSelected ? "selected" : ""} ${isHovered ? "hovered" : ""} ${trendClass(change)}"
-      style="--buoy-temp-color:${tempColor(temp)}; --callout-x:${layout.x + 90}px; --callout-y:${layout.y + 75}px; --leader-width:${layout.leaderWidth.toFixed(1)}px; --leader-angle:${layout.leaderAngle.toFixed(1)}deg"
-    >
-      <span class="buoy-marker-leader" aria-hidden="true"></span>
-      <span class="buoy-marker-pin" aria-hidden="true"></span>
-      <span class="buoy-marker-callout">
-        <strong class="buoy-marker-temp">${escapeHtml(tempLabel)}</strong>
-        <span class="buoy-marker-badge">${escapeHtml(changeLabel)}</span>
-        <span class="buoy-marker-label">
-          <b>${escapeHtml(station.id)}</b>
-          <small>${escapeHtml(stationShortName)}</small>
-        </span>
-      </span>
-    </div>
-  `;
 }
 
 function renderBuoySparkline() {
@@ -1213,113 +1094,30 @@ function renderBuoySummary(stations) {
   if (els.buoyDrop) els.buoyDrop.title = biggestDrop ? `${biggestDrop.id} · ${biggestDrop.name}` : "";
 }
 
-function renderLeafletBuoys(buoys, stations) {
-  const map = ensureBuoyMap(buoys.reference);
-  if (!map || !mapState.layer || !mapState.referenceLayer) return;
-
-  mapState.layer.clearLayers();
-  mapState.referenceLayer.clearLayers();
-  mapState.markers.clear();
-  mapState.stations = new Map(stations.map((station) => [station.id, station]));
-  mapState.selectedStationId = chooseDefaultBuoy(stations);
-
-  const reference = buoys.reference;
-  if (reference?.lat && reference?.lon) {
-    const referenceIcon = window.L.divIcon({
-      className: "leaflet-div-icon",
-      html: `<div class="line-marker">${escapeHtml(reference.name || "VA/NC line")}</div>`,
-      iconSize: [120, 32],
-      iconAnchor: [60, 16]
-    });
-    window.L.marker([reference.lat, reference.lon], { icon: referenceIcon, interactive: false }).addTo(mapState.referenceLayer);
-    [
-      { label: "1 mi", radius: 1609.344, color: "#d9672b", eastMiles: 1 },
-      { label: "10 mi", radius: 16093.44, color: "#b73f25", eastMiles: 10 }
-    ].forEach((ring) => {
-      window.L.circle([reference.lat, reference.lon], {
-        radius: ring.radius,
-        color: ring.color,
-        weight: ring.label === "1 mi" ? 2 : 2.5,
-        opacity: ring.label === "1 mi" ? 0.8 : 0.72,
-        fillColor: ring.color,
-        fillOpacity: ring.label === "1 mi" ? 0.08 : 0.035
-      }).addTo(mapState.referenceLayer);
-
-      const labelPoint = pointOffsetMiles(reference, ring.eastMiles, ring.label === "1 mi" ? 0.18 : 0.45);
-      if (!labelPoint) return;
-      const ringIcon = window.L.divIcon({
-        className: "leaflet-div-icon",
-        html: `<div class="ring-label">${escapeHtml(ring.label)}</div>`,
-        iconSize: [54, 26],
-        iconAnchor: [27, 13]
-      });
-      window.L.marker(labelPoint, { icon: ringIcon, interactive: false }).addTo(mapState.referenceLayer);
-    });
-  }
-
-  const bounds = [];
-  for (const station of stations) {
-    if (!Number.isFinite(station.lat) || !Number.isFinite(station.lon)) continue;
-    bounds.push([station.lat, station.lon]);
-
-    const marker = window.L.marker([station.lat, station.lon], {
-      icon: buoyStationIcon(station),
-      keyboard: true,
-      title: `${station.id} · ${station.name}`
-    })
-      .on("click", () => selectBuoyStation(station.id))
-      .on("mouseover", () => {
-        mapState.hoveredStationId = station.id;
-        updateBuoySelection();
-      })
-      .on("mouseout", () => {
-        if (mapState.hoveredStationId === station.id) {
-          mapState.hoveredStationId = null;
-          updateBuoySelection();
-        }
-      })
-      .addTo(mapState.layer);
-    marker.setZIndexOffset(station.id === mapState.selectedStationId ? 1000 : station.isStale ? -100 : 0);
-    mapState.markers.set(station.id, marker);
-  }
-
-  if (reference?.lat && reference?.lon) bounds.push([reference.lat, reference.lon]);
-  mapState.bounds = bounds;
-  fitBuoyMapBounds();
-
-  setTimeout(fitBuoyMapBounds, 0);
-  renderBuoyDetail(mapState.stations.get(mapState.selectedStationId));
+function onBuoyMapSelect(stationId) {
+  buoyUiState.selectedStationId = stationId;
+  updateBuoyListSelection(stationId);
+  renderBuoyDetail(buoyUiState.stations.get(stationId));
 }
 
-function updateBuoySelection() {
-  for (const [stationId, marker] of mapState.markers) {
-    const station = mapState.stations.get(stationId);
-    if (!station) continue;
-    marker.setIcon(buoyStationIcon(station));
-    marker.setZIndexOffset(stationId === mapState.selectedStationId || stationId === mapState.hoveredStationId
-      ? 1000
-      : station.isStale ? -100 : 0);
-  }
-
+function updateBuoyListSelection(stationId = getBuoyMap()?.getSelectedStationId()) {
   els.buoyList?.querySelectorAll(".buoy-list-item").forEach((item) => {
-    item.classList.toggle("selected", item.dataset.stationId === mapState.selectedStationId);
-    item.setAttribute("aria-pressed", item.dataset.stationId === mapState.selectedStationId ? "true" : "false");
+    const isSelected = item.dataset.stationId === stationId;
+    item.classList.toggle("selected", isSelected);
+    item.setAttribute("aria-pressed", isSelected ? "true" : "false");
   });
-  renderBuoyDetail(mapState.stations.get(mapState.selectedStationId));
 }
 
 function selectBuoyStation(stationId, options = {}) {
-  const marker = mapState.markers.get(stationId);
-  const station = mapState.stations.get(stationId);
-  if (!marker || !station || !mapState.map) return;
+  if (!buoyUiState.stations.has(stationId)) return;
 
-  mapState.selectedStationId = stationId;
-  updateBuoySelection();
-
-  const latLng = marker.getLatLng();
-  if (options.pan !== false) {
-    mapState.map.flyTo(latLng, Math.max(mapState.map.getZoom(), 7.65), { duration: 0.45 });
+  const map = getBuoyMap();
+  if (map?.hasMarker(stationId)) {
+    map.selectStation(stationId, options);
+    return;
   }
+
+  onBuoyMapSelect(stationId);
 }
 
 function renderBuoyList(stations) {
@@ -1347,7 +1145,7 @@ function renderBuoyList(stations) {
   els.buoyList.querySelectorAll(".buoy-list-item").forEach((item) => {
     item.addEventListener("click", () => selectBuoyStation(item.dataset.stationId));
   });
-  updateBuoySelection();
+  updateBuoyListSelection();
 }
 
 function renderAlerts(errors) {
@@ -1381,16 +1179,30 @@ function renderBuoyMap(buoys, trends) {
     setText(els.buoyNote, "No NOAA buoy station data is available right now.");
     if (els.buoyList) els.buoyList.innerHTML = "";
     renderBuoyDetail(null);
-    if (mapState.layer) mapState.layer.clearLayers();
+    getBuoyMap()?.clear();
     return;
   }
 
-  mapState.trends = new Map((trends?.stations || []).map((trend) => [trend.stationId, trend]));
+  buoyUiState.trends = new Map((trends?.stations || []).map((trend) => [trend.stationId, trend]));
   const stations = sortBuoyStations(mergeBuoyTrends(buoys.stations, trends));
+  buoyUiState.stations = new Map(stations.map((station) => [station.id, station]));
   renderBuoySummary(stations);
   setText(els.buoyNote, "Stale reports are muted and excluded from fresh movement summaries.");
-  renderLeafletBuoys(buoys, stations);
+
   renderBuoyList(stations);
+
+  const map = getBuoyMap();
+  if (!map?.init(buoys.reference)) {
+    setText(els.buoyNote, "Map tiles are unavailable, but the buoy list below still shows live station temperatures.");
+    return;
+  }
+
+  map.setTheme(getResolvedTheme());
+  map.setReference(buoys.reference);
+  const selectedId = chooseDefaultBuoy(stations, buoyUiState.selectedStationId ?? map.getSelectedStationId());
+  map.setStations(stations, { selectedId, preserveView: map.hasStations() });
+  map.selectStation(selectedId, { pan: false, notify: false });
+  onBuoyMapSelect(selectedId);
 }
 
 function renderTide(tide) {
@@ -1663,7 +1475,42 @@ els.sourcesClose?.addEventListener("click", closeSourcesDialog);
 els.sourcesDialog?.addEventListener("click", (event) => {
   if (event.target === els.sourcesDialog) closeSourcesDialog();
 });
-window.addEventListener("resize", scheduleBuoyMapResize);
+window.addEventListener("resize", () => getBuoyMap()?.scheduleResize());
+
+if (els.buoyMap && "IntersectionObserver" in window) {
+  const buoyMapVisibility = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return;
+    getBuoyMap()?.scheduleResize();
+  }, { threshold: 0.2 });
+  buoyMapVisibility.observe(els.buoyMap);
+}
+
+function loadWebcamPlayer() {
+  const iframe = els.webcamPlayer;
+  const wrap = els.webcamWrap;
+  if (!iframe?.dataset.src || iframe.src || !wrap) return false;
+  iframe.src = iframe.dataset.src;
+  wrap.classList.add("is-loaded");
+  return true;
+}
+
+function initLazyWebcam() {
+  if (!els.webcamPlayer?.dataset.src) return;
+
+  els.webcamLoad?.addEventListener("click", () => loadWebcamPlayer());
+
+  if (!("IntersectionObserver" in window) || !els.webcamWrap) return;
+
+  const webcamVisibility = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return;
+    loadWebcamPlayer();
+    webcamVisibility.disconnect();
+  }, { rootMargin: "240px 0px", threshold: 0.01 });
+
+  webcamVisibility.observe(els.webcamWrap);
+}
+
+initLazyWebcam();
 
 function initializeTheme() {
   themePreference = readThemePreference();
@@ -1683,21 +1530,18 @@ async function loadSnapshot({ useStoredSnapshot = false, pollUntilNewerThan, pol
   if (storedSnapshot && !chartState.data) {
     chartState.usingStoredSnapshot = true;
     chartState.refreshError = null;
-    render(storedSnapshot);
+    safeRender(storedSnapshot);
     refreshBuoyTrends(storedSnapshot);
   }
 
   try {
-    const response = await fetch("/api/snapshot", {
-      cache: "no-store",
-      headers: { accept: "application/json" }
+    const snapshot = await fetchSnapshotWithTimeout({
+      initialLoad: !chartState.data && !storedSnapshot
     });
-    if (!response.ok) throw new Error(`Dashboard API returned ${response.status}`);
-    const snapshot = await response.json();
     writeStoredSnapshot(snapshot);
     chartState.usingStoredSnapshot = false;
     chartState.refreshError = null;
-    render(snapshot);
+    safeRender(snapshot);
     refreshBuoyTrends(snapshot);
     scheduleSnapshotPoll(snapshot, pollUntilNewerThan, pollDeadline);
   } catch (error) {
@@ -1706,14 +1550,30 @@ async function loadSnapshot({ useStoredSnapshot = false, pollUntilNewerThan, pol
     chartState.refreshError = message;
 
     if (!chartState.data) {
-      setText(els.status, "Unable to load data");
-      setText(els.lastUpdated, message);
-      els.statusDot?.classList.remove("ok");
-      els.statusDot?.classList.remove("stale");
-      renderAlerts({ dashboard: message });
+      const fallbackSnapshot = readStoredSnapshot();
+      if (fallbackSnapshot) {
+        chartState.usingStoredSnapshot = true;
+        safeRender(fallbackSnapshot);
+        refreshBuoyTrends(fallbackSnapshot);
+        updateCacheStatus();
+        renderAlerts({
+          ...(fallbackSnapshot.errors || {}),
+          dashboard: `Refresh failed: ${message}`
+        });
+      } else {
+        setText(els.status, "Unable to load data");
+        setText(els.lastUpdated, message);
+        els.statusDot?.classList.remove("ok");
+        els.statusDot?.classList.remove("stale");
+        updateCacheStatus();
+        renderAlerts({ dashboard: message });
+      }
     } else {
       updateCacheStatus();
-      renderAlerts({ ...(chartState.data.errors || {}), dashboard: `Refresh failed: ${message}` });
+      renderAlerts({
+        ...(chartState.data.errors || {}),
+        dashboard: `Refresh failed: ${message}`
+      });
     }
   }
 }

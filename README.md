@@ -220,18 +220,12 @@ bun run check
 
 The check command uses an isolated SQLite file under `/private/tmp` so it can run while a dev server is using the default local history database.
 
-Expected shape:
+The command writes structured JSON log lines. The final line has `event: "snapshot_check_completed"`:
 
-```json
-{
-  "ok": true,
-  "hasSound": true,
-  "hasMarine": true,
-  "hasWeather": true,
-  "hasBuoys": true,
-  "hasTide": true,
-  "errors": {}
-}
+```jsonl
+{"level":"info","msg":"snapshot_refresh_started","event":"snapshot_refresh_started"}
+{"level":"info","msg":"snapshot_refresh_completed","event":"snapshot_refresh_completed","errorCount":0}
+{"level":"info","msg":"snapshot_check_completed","event":"snapshot_check_completed","ok":true,"hasSound":true,"hasMarine":true,"hasWeather":true,"hasBuoys":true,"hasTide":true,"errorCount":0,"errors":{}}
 ```
 
 Inspect local database stats:
@@ -244,10 +238,10 @@ bun -e "import { getDatabaseStats } from './src/db.ts'; console.log(JSON.stringi
 
 The frontend is deliberately framework-free:
 
-- `public/app.js` polls `/api/snapshot` every 15 minutes.
+- `public/app.js` polls `/api/snapshot` every 15 minutes; buoy trends refresh with each snapshot load.
 - Sparkline charts are rendered as inline SVG paths.
 - The Surf tile can toggle the Duck FRF chart between wave height and water temperature while keeping the same 1, 7, and 30 day windows.
-- The buoy map uses Leaflet with OpenStreetMap tiles, station-coordinate markers, popups, and a one-mile VA/NC-line reference circle.
+- The buoy map uses a modular Leaflet layer stack (`public/buoy-map.js`) with OpenStreetMap/CARTO tiles, geo-anchored station markers, temperature callout markers, and a VA/NC-line reference circle.
 - The visual design uses glassy cards over a generated OBX background with readability overlays.
 - Theme behavior:
   - On load, the dashboard follows your OS/browser color scheme preference (`prefers-color-scheme`).
@@ -257,7 +251,7 @@ The frontend is deliberately framework-free:
 
 If the UI grows, likely next steps are:
 
-- Move rendering into small modules.
+- Extend `public/buoy-map.js` with additional overlay layers as more geo data is added.
 - Add a typed shared API contract.
 - Move external browser dependencies into bundled assets if offline/local-network operation becomes important.
 
@@ -269,10 +263,39 @@ If the UI grows, likely next steps are:
 - Add admin controls for station inclusion/exclusion.
 - Add station health indicators and last-success timestamps.
 
+## Logging and Loki
+
+The server writes structured JSON logs to stdout for Grafana Loki ingestion. In Kubernetes, scrape container logs from the `obx` namespace and parse each line as JSON.
+
+Environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SERVICE_NAME` | `obx-conditions` | Loki label candidate |
+| `LOG_LEVEL` | `info` in production, `debug` in development | Minimum log level |
+| `LOG_FORMAT` | `json` | `bun run dev` sets `pretty`; Helm/Docker set `json` for Loki |
+
+Logged events include:
+
+- `server_started` — process boot
+- `http_request` — API usage and errors (`method`, `path`, `route`, `status`, `durationMs`)
+- `snapshot_served` — cache hits and refresh states
+- `snapshot_refresh_started` / `snapshot_refresh_completed` — external feed refresh timing
+- `feed_failed` — per-source NOAA/USGS/NWS failures
+- `snapshot_persist_failed` / `snapshot_request_failed` — SQLite and API errors
+
+Example LogQL queries:
+
+```logql
+{namespace="obx", app_kubernetes_io_name="obx"} | json | level="error"
+{namespace="obx"} | json | event="feed_failed"
+{namespace="obx"} | json | event="http_request" | path="/api/snapshot"
+```
+
 ## Operational Notes
 
 - External data is public and can be temporarily unavailable.
-- The map uses OpenStreetMap tiles from `tile.openstreetmap.org` and Leaflet assets from `unpkg.com`; if those browser-side assets are unavailable, the station list still renders.
+- The map uses OpenStreetMap/CARTO tiles from the network and vendored Leaflet assets from `public/vendor/leaflet/`; if Leaflet fails to load, the station list still renders.
 - NOAA stations may report `MM` for missing values; parsers convert those to empty fields.
 - `44100` often has older data; it is retained because it is useful when reporting, but stale state is shown.
 - `/api/snapshot` serves the newest SQLite snapshot for fifteen minutes before refreshing external sources.

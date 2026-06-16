@@ -1,4 +1,5 @@
 import { getBuoyTrends, getCachedSnapshot, getDatabaseStats, getHistory, getLatestSnapshot, normalizeHistoryLimit, persistSnapshot } from "./db";
+import { createRequestLogger, errorMessage, logger } from "./logger";
 import { stat } from "node:fs/promises";
 
 const PORT = Number(Bun.env.PORT || 3000);
@@ -630,6 +631,9 @@ async function getWeather() {
 }
 
 async function getLiveSnapshot() {
+  const startedAt = Date.now();
+  logger.logSnapshot("snapshot_refresh_started");
+
   const errors: ApiErrorMap = {};
   const [sound, marine, weather, buoys, tide] = await Promise.allSettled([
     getSoundLevel(),
@@ -639,11 +643,12 @@ async function getLiveSnapshot() {
     getAtlanticTide()
   ]);
 
-  if (sound.status === "rejected") errors.sound = sound.reason?.message ?? "USGS feed failed";
-  if (marine.status === "rejected") errors.marine = marine.reason?.message ?? "NOAA NDBC feed failed";
-  if (weather.status === "rejected") errors.weather = weather.reason?.message ?? "Weather feed failed";
-  if (buoys.status === "rejected") errors.buoys = buoys.reason?.message ?? "NOAA buoy network failed";
-  if (tide.status === "rejected") errors.tide = tide.reason?.message ?? "NOAA CO-OPS tide feed failed";
+  if (sound.status === "rejected") errors.sound = errorMessage(sound.reason) || "USGS feed failed";
+  if (marine.status === "rejected") errors.marine = errorMessage(marine.reason) || "NOAA NDBC feed failed";
+  if (weather.status === "rejected") errors.weather = errorMessage(weather.reason) || "Weather feed failed";
+  if (buoys.status === "rejected") errors.buoys = errorMessage(buoys.reason) || "NOAA buoy network failed";
+  if (tide.status === "rejected") errors.tide = errorMessage(tide.reason) || "NOAA CO-OPS tide feed failed";
+  logger.logFeedErrors(errors, { phase: "snapshot_refresh" });
 
   const snapshot = {
     generatedAt: new Date().toISOString(),
@@ -658,21 +663,52 @@ async function getLiveSnapshot() {
   try {
     persistSnapshot(snapshot);
   } catch (error) {
-    snapshot.errors.persistence = error instanceof Error ? error.message : "SQLite persistence failed";
+    const message = errorMessage(error) || "SQLite persistence failed";
+    snapshot.errors.persistence = message;
+    logger.error("snapshot_persist_failed", {
+      event: "snapshot_persist_failed",
+      component: "snapshot",
+      error: message
+    });
   }
 
-  return {
+  const response = {
     ...snapshot,
     sound: omitHistory(snapshot.sound),
     marine: omitHistory(snapshot.marine),
     buoys: omitBuoyHistory(snapshot.buoys)
   };
+
+  logger.logSnapshot("snapshot_refresh_completed", {
+    durationMs: Date.now() - startedAt,
+    errorCount: Object.keys(response.errors).length,
+    hasSound: Boolean(response.sound?.latest),
+    hasMarine: Boolean(response.marine?.latest),
+    hasWeather: Boolean(response.weather?.temperatureF),
+    hasBuoys: Boolean(response.buoys?.stations?.length),
+    hasTide: Boolean(response.tide?.next)
+  });
+
+  return response;
 }
 
-function startSnapshotRefresh() {
-  snapshotRefresh ??= getLiveSnapshot().finally(() => {
-    snapshotRefresh = undefined;
-  });
+function startSnapshotRefresh(trigger: "cache_miss" | "cold_start" | "check") {
+  if (!snapshotRefresh) {
+    snapshotRefresh = getLiveSnapshot()
+      .catch((error) => {
+        logger.error("snapshot_refresh_failed", {
+          event: "snapshot_refresh_failed",
+          component: "snapshot",
+          trigger,
+          error: errorMessage(error)
+        });
+        throw error;
+      })
+      .finally(() => {
+        snapshotRefresh = undefined;
+      });
+    logger.debug("snapshot_refresh_scheduled", { trigger });
+  }
   return snapshotRefresh;
 }
 
@@ -696,75 +732,116 @@ function withCacheMetadata(snapshot: any, cacheStatus: "fresh" | "cached" | "ref
 
 async function getSnapshot() {
   const cached = getCachedSnapshot(SNAPSHOT_CACHE_MS);
-  if (cached) return withCacheMetadata(cached, "cached");
+  if (cached) {
+    const generatedAtMs = new Date(cached.generatedAt).getTime();
+    const ageMs = Number.isFinite(generatedAtMs) ? Date.now() - generatedAtMs : 0;
+    logger.debug("snapshot_served", {
+      event: "snapshot_served",
+      component: "snapshot",
+      cacheStatus: "cached",
+      ageMs
+    });
+    return withCacheMetadata(cached, "cached");
+  }
 
   const latest = getLatestSnapshot();
   if (latest) {
-    startSnapshotRefresh().catch((error) => {
-      console.error("Background snapshot refresh failed", error);
+    startSnapshotRefresh("cache_miss");
+    logger.info("snapshot_served", {
+      event: "snapshot_served",
+      component: "snapshot",
+      cacheStatus: "refreshing",
+      ageMs: snapshotAgeMs(latest.generatedAt)
     });
     return withCacheMetadata(latest, "refreshing");
   }
 
-  return withCacheMetadata(await startSnapshotRefresh(), "fresh");
+  logger.info("snapshot_served", {
+    event: "snapshot_served",
+    component: "snapshot",
+    cacheStatus: "fresh",
+    coldStart: true
+  });
+  return withCacheMetadata(await startSnapshotRefresh("cold_start"), "fresh");
+}
+
+function snapshotAgeMs(generatedAt: string | undefined) {
+  const generatedAtMs = new Date(generatedAt ?? "").getTime();
+  return Number.isFinite(generatedAtMs) ? Math.max(0, Date.now() - generatedAtMs) : undefined;
 }
 
 if (Bun.argv.includes("--once")) {
-  const snapshot = withCacheMetadata(await startSnapshotRefresh(), "fresh");
-  console.log(JSON.stringify({
-    ok: true,
+  const snapshot = withCacheMetadata(await startSnapshotRefresh("check"), "fresh");
+  logger.info("snapshot_check_completed", {
+    event: "snapshot_check_completed",
+    component: "snapshot",
+    ok: Object.keys(snapshot.errors).length === 0,
     generatedAt: snapshot.generatedAt,
     hasSound: Boolean(snapshot.sound?.latest),
     hasMarine: Boolean(snapshot.marine?.latest),
     hasWeather: Boolean(snapshot.weather?.temperatureF),
     hasBuoys: Boolean(snapshot.buoys?.stations?.length),
     hasTide: Boolean(snapshot.tide?.next),
+    errorCount: Object.keys(snapshot.errors).length,
     errors: snapshot.errors
-  }, null, 2));
+  });
   process.exit(Object.keys(snapshot.errors).length ? 1 : 0);
 }
 
 Bun.serve({
   port: PORT,
   async fetch(request) {
+    const startedAt = Date.now();
     const url = new URL(request.url);
+    const reqLog = createRequestLogger(request);
+    let response: Response;
 
-    if (url.pathname === "/api/snapshot") {
-      try {
-        return json(await getSnapshot(), 200, {
-          "cache-control": "private, max-age=900, stale-while-revalidate=300"
+    try {
+      if (url.pathname === "/api/snapshot") {
+        try {
+          response = json(await getSnapshot());
+        } catch (error) {
+          reqLog.error("snapshot_request_failed", {
+            event: "snapshot_request_failed",
+            component: "snapshot",
+            error: errorMessage(error)
+          });
+          response = json({ error: errorMessage(error) || "Unknown server error" }, 500);
+        }
+      } else if (url.pathname === "/api/history") {
+        const kind = url.searchParams.get("kind") || "snapshots";
+        const limit = Number(url.searchParams.get("limit") || 250);
+        const safeLimit = normalizeHistoryLimit(limit);
+        response = json({
+          kind,
+          limit: safeLimit,
+          rows: getHistory(kind, safeLimit)
         });
-      } catch (error) {
-        return json({ error: error instanceof Error ? error.message : "Unknown server error" }, 500);
+      } else if (url.pathname === "/api/buoy-trends") {
+        response = json(getBuoyTrends());
+      } else if (url.pathname === "/api/db/stats") {
+        response = json(getDatabaseStats());
+      } else {
+        const staticResponse = await publicAsset(request, url.pathname);
+        response = staticResponse ?? new Response("Not found", { status: 404 });
       }
-    }
-
-    if (url.pathname === "/api/history") {
-      const kind = url.searchParams.get("kind") || "snapshots";
-      const limit = Number(url.searchParams.get("limit") || 250);
-      const safeLimit = normalizeHistoryLimit(limit);
-      return json({
-        kind,
-        limit: safeLimit,
-        rows: getHistory(kind, safeLimit)
+    } catch (error) {
+      reqLog.error("request_unhandled", {
+        event: "request_unhandled",
+        error: errorMessage(error)
       });
+      response = new Response("Internal Server Error", { status: 500 });
     }
 
-    if (url.pathname === "/api/buoy-trends") {
-      return json(getBuoyTrends());
-    }
-
-    if (url.pathname === "/api/db/stats") {
-      return json(getDatabaseStats());
-    }
-
-    const staticResponse = await publicAsset(request, url.pathname);
-    if (staticResponse) {
-      return staticResponse;
-    }
-
-    return new Response("Not found", { status: 404 });
+    logger.logHttp(request, response, Date.now() - startedAt);
+    return response;
   }
 });
 
-console.log(`OBX Conditions running at http://localhost:${PORT}`);
+logger.info("server_started", {
+  event: "server_started",
+  port: PORT,
+  dbPath: Bun.env.DB_PATH || "obx.sqlite",
+  snapshotCacheMs: SNAPSHOT_CACHE_MS,
+  logLevel: logger.level
+});
